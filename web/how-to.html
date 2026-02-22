@@ -527,8 +527,9 @@
               <div class="step-title">Download the binary</div>
               <div class="step-desc">Use Apple Silicon build by default. If you're on Intel, swap to <code style="font-family:'IBM Plex Mono',Consolas,monospace;font-size:12px;color:#a5d6ff">opencortex-darwin-amd64</code>.</div>
               <div class="code-block">
-                <code>curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex</code>
-                <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex')">Copy</button>
+                <code>curl -L https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_darwin_arm64.tar.gz -o opencortex.tar.gz
+tar -xzf opencortex.tar.gz</code>
+                <button class="copy-btn" onclick="copy(this, 'curl -L https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_darwin_arm64.tar.gz -o opencortex.tar.gz\ntar -xzf opencortex.tar.gz')">Copy</button>
               </div>
             </div>
           </div>
@@ -572,8 +573,9 @@
             <div class="step-body">
               <div class="step-title">Download the binary</div>
               <div class="code-block">
-                <code>curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex</code>
-                <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex')">Copy</button>
+                <code>curl -L https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_linux_amd64.tar.gz -o opencortex.tar.gz
+tar -xzf opencortex.tar.gz</code>
+                <button class="copy-btn" onclick="copy(this, 'curl -L https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_linux_amd64.tar.gz -o opencortex.tar.gz\ntar -xzf opencortex.tar.gz')">Copy</button>
               </div>
             </div>
           </div>
@@ -617,8 +619,9 @@
             <div class="step-body">
               <div class="step-title">Download the binary</div>
               <div class="code-block">
-                <code>Invoke-WebRequest -Uri https://thejuampi.github.io/opencortex/releases/opencortex-windows-amd64.exe -OutFile opencortex.exe</code>
-                <button class="copy-btn" onclick="copy(this, 'Invoke-WebRequest -Uri https://thejuampi.github.io/opencortex/releases/opencortex-windows-amd64.exe -OutFile opencortex.exe')">Copy</button>
+                <code>Invoke-WebRequest -Uri https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_windows_amd64.zip -OutFile opencortex.zip
+Expand-Archive .\opencortex.zip -DestinationPath . -Force</code>
+                <button class="copy-btn" onclick="copy(this, 'Invoke-WebRequest -Uri https://github.com/Thejuampi/opencortex/releases/latest/download/opencortex_windows_amd64.zip -OutFile opencortex.zip\nExpand-Archive .\\opencortex.zip -DestinationPath . -Force')">Copy</button>
               </div>
             </div>
           </div>

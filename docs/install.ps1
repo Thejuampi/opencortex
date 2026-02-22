@@ -3,10 +3,6 @@ $ErrorActionPreference = "Stop"
 $Repo = if ($env:OPENCORTEX_REPO) { $env:OPENCORTEX_REPO } else { "Thejuampi/opencortex" }
 $PagesBase = if ($env:OPENCORTEX_PAGES_URL) { $env:OPENCORTEX_PAGES_URL } else { "https://thejuampi.github.io/opencortex" }
 
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
-$tag = $release.tag_name
-if (-not $tag) { throw "Could not resolve latest release tag" }
-
 $arch = if ([Environment]::Is64BitOperatingSystem) {
   if ($env:PROCESSOR_ARCHITECTURE -match "ARM64") { "arm64" } else { "amd64" }
 } else {
@@ -18,9 +14,9 @@ $tmp = Join-Path $env:TEMP ("opencortex-install-" + [Guid]::NewGuid().ToString("
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 try {
-  Write-Host "Downloading OpenCortex $tag..."
-  $assetUrl = "https://github.com/$Repo/releases/download/$tag/$asset"
-  $checksumUrl = "https://github.com/$Repo/releases/download/$tag/checksums.txt"
+  Write-Host "Downloading OpenCortex latest..."
+  $assetUrl = "https://github.com/$Repo/releases/latest/download/$asset"
+  $checksumUrl = "https://github.com/$Repo/releases/latest/download/checksums.txt"
   $zipPath = Join-Path $tmp $asset
   $checksumsPath = Join-Path $tmp "checksums.txt"
   Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath
