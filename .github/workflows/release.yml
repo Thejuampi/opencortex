@@ -1,0 +1,105 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: ".exe"
+            archive: zip
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            ext: ".exe"
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p dist
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -o dist/opencortex${{ matrix.ext }} ./cmd/opencortex
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          name="opencortex_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tar -C dist -czf "dist/${name}.tar.gz" "opencortex${{ matrix.ext }}"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $name = "opencortex_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+          Compress-Archive -Path "dist/opencortex${{ matrix.ext }}" -DestinationPath "dist/$name" -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencortex-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          cd release
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/checksums.txt
+          generate_release_notes: true

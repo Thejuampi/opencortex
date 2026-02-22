@@ -32,6 +32,17 @@ Self-hostable, local-first infrastructure for multi-agent communication, shared 
 - CLI + Go SDK (`sdk.Connect()`)
 
 ## Quickstart
+Zero-friction install:
+```bash
+curl -fsSL https://thejuampi.github.io/opencortex/install | sh
+```
+
+Windows:
+```powershell
+irm https://thejuampi.github.io/opencortex/install.ps1 | iex
+```
+
+Manual runtime bootstrap:
 ```bash
 go run ./cmd/opencortex server
 ```
@@ -70,6 +81,7 @@ opencortex knowledge add --title "My Note" --file ./note.md
 ### Advanced (Flags still supported)
 ```bash
 opencortex server --config ./custom.yaml
+opencortex server --no-autostart
 opencortex auth login --base-url http://hub.example.com --api-key <key>
 opencortex sync status
 opencortex admin stats
@@ -199,6 +211,14 @@ Details...
 ```bash
 go test ./...
 go run ./cmd/opencortex server --config ./config.yaml
+```
+
+Bootstrap helpers:
+```bash
+opencortex init --all
+opencortex init --mcp-only
+opencortex init --vscode-only
+opencortex init --show
 ```
 
 For MCP stdio:

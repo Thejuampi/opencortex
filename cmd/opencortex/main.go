@@ -31,6 +31,7 @@ import (
 	"opencortex/internal/api"
 	"opencortex/internal/api/handlers"
 	ws "opencortex/internal/api/websocket"
+	"opencortex/internal/bootstrap"
 	"opencortex/internal/broker"
 	"opencortex/internal/config"
 	mcpbridge "opencortex/internal/mcp"
@@ -128,7 +129,7 @@ func main() {
   opencortex agents`),
 	}
 	root.SetHelpFunc(renderHelp)
-	root.PersistentFlags().StringVar(&cfgPath, "config", "config.yaml", "Path to config file")
+	root.PersistentFlags().StringVar(&cfgPath, "config", bootstrap.ManagedConfigPath(), "Path to config file")
 	root.PersistentFlags().StringVar(&baseURL, "base-url", discoverServerURL(), "Base API URL for CLI commands")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for CLI commands (optional on localhost)")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON output")
@@ -804,42 +805,76 @@ MCP config (minimal):
 // ─── Existing command constructors follow ─────────────────────────────────────
 
 func newInitCommand(cfgPath *string) *cobra.Command {
-	var adminName string
+	var (
+		adminName  string
+		all        bool
+		mcpOnly    bool
+		vscodeOnly bool
+		show       bool
+		silent     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize local opencortex state and create admin key",
+		Short: "Bootstrap local opencortex runtime and integrations",
 		Example: strings.TrimSpace(`
-  opencortex init --config ./config.yaml
-  opencortex init --admin-name "platform-admin"`),
+  opencortex init
+  opencortex init --all --silent
+  opencortex init --mcp-only
+  opencortex init --vscode-only
+  opencortex init --show`),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if show {
+				return printJSON(map[string]any{"status": bootstrap.CurrentStatus()})
+			}
+			if mcpOnly && vscodeOnly {
+				return errors.New("--mcp-only and --vscode-only are mutually exclusive")
+			}
+			if !all && !mcpOnly && !vscodeOnly {
+				all = true
+			}
+			if *cfgPath == bootstrap.ManagedConfigPath() {
+				if _, err := bootstrap.EnsureManagedConfig(*cfgPath); err != nil {
+					return err
+				}
+			}
 			cfg, err := loadConfigMaybe(*cfgPath)
 			if err != nil {
 				return err
 			}
-			ctx := context.Background()
-			db, err := storage.Open(ctx, cfg)
+			if strings.TrimSpace(adminName) != "" {
+				cfg.Auth.AdminKey = ""
+			}
+			state, err := runBootstrap(context.Background(), *cfgPath, cfg, bootstrapRunOptions{
+				All:        all,
+				MCPOnly:    mcpOnly,
+				VSCodeOnly: vscodeOnly,
+				Silent:     silent,
+				ServerURL:  fmt.Sprintf("http://localhost:%d", cfg.Server.Port),
+				AdminName:  adminName,
+			})
 			if err != nil {
 				return err
 			}
-			defer db.Close()
-			if err := storage.Migrate(ctx, db); err != nil {
-				return err
+			if silent {
+				return nil
 			}
-
-			store := repos.New(db)
-			memBroker := broker.NewMemory(cfg.Broker.ChannelBufferSize)
-			app := service.New(cfg, store, memBroker)
-			agent, key, err := app.BootstrapInit(ctx, adminName)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Initialized at %s\n", filepath.Clean(cfg.Database.Path))
-			fmt.Printf("Admin Agent ID: %s\n", agent.ID)
-			fmt.Printf("Admin API Key (shown once): %s\n", key)
+			fmt.Println("OpenCortex bootstrap complete.")
+			fmt.Printf("  Config:    %s\n", filepath.Clean(*cfgPath))
+			fmt.Printf("  Database:  %s\n", filepath.Clean(cfg.Database.Path))
+			fmt.Printf("  Server:    %s\n", strings.TrimSpace(state.ServerURL))
+			fmt.Printf("  Copilot:   %v\n", state.CopilotMCPConfigured)
+			fmt.Printf("  Codex:     %v\n", state.CodexMCPConfigured)
+			fmt.Printf("  VSCode:    %v\n", state.VSCodeExtensionInstalled)
+			fmt.Printf("  Autostart: %v\n", state.AutostartConfigured)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&adminName, "admin-name", "admin", "Name for bootstrap admin agent")
+	cmd.Flags().StringVar(&adminName, "admin-name", "", "Name for bootstrap admin agent (forces admin key rotation on init)")
+	cmd.Flags().BoolVar(&all, "all", false, "Run full bootstrap (default)")
+	cmd.Flags().BoolVar(&mcpOnly, "mcp-only", false, "Only update MCP configs")
+	cmd.Flags().BoolVar(&vscodeOnly, "vscode-only", false, "Only install VSCode extension if available")
+	cmd.Flags().BoolVar(&show, "show", false, "Show current bootstrap state")
+	cmd.Flags().BoolVar(&silent, "silent", false, "Suppress non-essential output")
 	return cmd
 }
 
@@ -847,6 +882,8 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 	var (
 		mcpHTTPEnabled bool
 		mcpHTTPPath    string
+		noAutostart    bool
+		openBrowser    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "server",
@@ -855,6 +892,11 @@ func newServerCommand(cfgPath *string) *cobra.Command {
   opencortex server
   opencortex server --config ./config.yaml`),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if *cfgPath == bootstrap.ManagedConfigPath() {
+				if _, err := bootstrap.EnsureManagedConfig(*cfgPath); err != nil {
+					return err
+				}
+			}
 			cfg, err := loadConfigMaybe(*cfgPath)
 			if err != nil {
 				return err
@@ -866,12 +908,38 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 				cfg.MCP.HTTP.Path = strings.TrimSpace(mcpHTTPPath)
 			}
 
+			port, portErr := selectAvailablePort(cfg.Server.Port, 10)
+			if portErr != nil {
+				return portErr
+			}
+			if port != cfg.Server.Port {
+				fmt.Printf("Port %d is in use. Trying %d... ✓\n", cfg.Server.Port, port)
+				cfg.Server.Port = port
+				if err := saveConfig(*cfgPath, cfg); err != nil {
+					return err
+				}
+			}
+
+			serverURL := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+			_, stateErr := os.Stat(bootstrap.StatePath())
+			firstRun := errors.Is(stateErr, os.ErrNotExist)
+			if firstRun {
+				if _, err := runBootstrap(context.Background(), *cfgPath, cfg, bootstrapRunOptions{
+					All:         true,
+					Silent:      true,
+					NoAutostart: noAutostart,
+					ServerURL:   serverURL,
+				}); err != nil {
+					return err
+				}
+			}
+
 			// ── Single-instance enforcement ──────────────────────────────────
 			existingPID, serverAddr, lockErr := acquireServerLock(cfg.Server.Port)
 			if errors.Is(lockErr, errAlreadyRunning) {
-				fmt.Printf("OpenCortex is already running on this host (pid %d).\nConnect your agents to %s\n",
+				fmt.Printf("OpenCortex is already running on this host (pid %d).\nDashboard → %s\n",
 					existingPID, serverAddr)
-				os.Exit(2)
+				return nil
 			}
 			if lockErr != nil {
 				return fmt.Errorf("acquire server lock: %w", lockErr)
@@ -966,19 +1034,27 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 				ReadTimeout:  config.ReadTimeout(cfg),
 				WriteTimeout: config.WriteTimeout(cfg),
 			}
-			serverURL := fmt.Sprintf("http://%s", httpServer.Addr)
+			serverURL = fmt.Sprintf("http://%s", httpServer.Addr)
 			if httpServer.Addr == "" || strings.HasPrefix(httpServer.Addr, ":") {
 				serverURL = fmt.Sprintf("http://localhost%s", httpServer.Addr)
 			}
 			writeServerFile(serverURL)
 			log.Printf("opencortex server listening on %s", config.Addr(cfg))
 			log.Printf("connect your agents to %s", serverURL)
+			if (firstRun && openBrowser) || (openBrowser && cmd.Flags().Changed("open-browser")) {
+				go func(target string) {
+					time.Sleep(700 * time.Millisecond)
+					maybeOpenBrowser(target)
+				}(serverURL)
+			}
 			return httpServer.ListenAndServe()
 
 		},
 	}
 	cmd.Flags().BoolVar(&mcpHTTPEnabled, "mcp-http-enabled", true, "Enable MCP streamable HTTP endpoint")
 	cmd.Flags().StringVar(&mcpHTTPPath, "mcp-http-path", "", "Override MCP streamable HTTP endpoint path")
+	cmd.Flags().BoolVar(&noAutostart, "no-autostart", false, "Disable auto-start setup during bootstrap")
+	cmd.Flags().BoolVar(&openBrowser, "open-browser", true, "Open dashboard in browser on first run")
 	return cmd
 }
 
@@ -1875,11 +1951,14 @@ func adminSimpleCommand(use, path string, baseURL, apiKey *string) *cobra.Comman
 
 func loadConfigMaybe(path string) (config.Config, error) {
 	if path == "" {
-		return config.Default(), nil
+		path = bootstrap.ManagedConfigPath()
 	}
 	if _, err := os.Stat(path); err == nil {
 		return config.Load(path)
 	} else if errors.Is(err, os.ErrNotExist) {
+		if path == bootstrap.ManagedConfigPath() {
+			return bootstrap.EnsureManagedConfig(path)
+		}
 		return config.Default(), nil
 	} else {
 		return config.Config{}, err
@@ -2104,8 +2183,8 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 	if cmd.CommandPath() == "opencortex" {
 		fmt.Fprintf(b, "%sQUICK WORKFLOWS%s\n", sectionColor(), ansiReset)
 		fmt.Fprintf(b, "  %sBoot and access UI%s\n", ansiGray, ansiReset)
-		fmt.Fprintf(b, "    opencortex init --config ./config.yaml\n")
-		fmt.Fprintf(b, "    opencortex server --config ./config.yaml\n")
+		fmt.Fprintf(b, "    opencortex init --all\n")
+		fmt.Fprintf(b, "    opencortex server\n")
 		fmt.Fprintf(b, "    # open http://localhost:8080\n\n")
 
 		fmt.Fprintf(b, "  %sRun MCP stdio server%s\n", ansiGray, ansiReset)

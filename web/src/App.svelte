@@ -14,6 +14,8 @@
   let apiKey = localStorage.getItem('opencortex_api_key') || ''
   let wsState = 'disconnected'
   let ws
+  let bootstrapStatus = null
+  let bootstrapPoller
 
   const tabs = [
     ['/', 'Dashboard'],
@@ -48,6 +50,15 @@
   }
 
   async function loadData() {
+    if (route === '/') {
+      try {
+        const res = await fetch('/api/v1/bootstrap/status')
+        const body = await res.json()
+        bootstrapStatus = body?.ok ? body?.data?.status : null
+      } catch {
+        bootstrapStatus = null
+      }
+    }
     if (!apiKey.trim()) {
       stats = {}
       knowledge = []
@@ -115,6 +126,12 @@
   onMount(() => {
     loadData()
     connectWS()
+    bootstrapPoller = setInterval(() => {
+      if (route === '/') loadData()
+    }, 2000)
+    return () => {
+      if (bootstrapPoller) clearInterval(bootstrapPoller)
+    }
   })
 
   $: renderedMarkdown = selectedKnowledge?.content ? marked.parse(selectedKnowledge.content) : ''
@@ -146,6 +163,19 @@
         <h2>Live Activity</h2>
         <p>High-throughput local-first agent coordination with embedded realtime channels.</p>
       </article>
+      {#if bootstrapStatus}
+        <article class="panel ready">
+          <h3>Ready</h3>
+          <div class="ready-grid">
+            <p>Server: <strong>{bootstrapStatus.server_url || 'starting...'}</strong></p>
+            <p>MCP: <strong>{bootstrapStatus.copilot_mcp_configured && bootstrapStatus.codex_mcp_configured ? 'configured' : 'pending'}</strong></p>
+            <p>VSCode: <strong>{bootstrapStatus.vscode_extension_installed ? 'installed' : 'not detected'}</strong></p>
+          </div>
+          <p class="hint">Waiting for agents to connect...</p>
+          <pre><code>opencortex send --to self "hello"
+opencortex inbox</code></pre>
+        </article>
+      {/if}
       <div class="card-grid">
         <article class="panel">
           <h3>Agents</h3>
@@ -371,6 +401,20 @@
 
   .dashboard { display: grid; gap: 1rem; }
   .hero p { color: #d4dcef; }
+  .ready .ready-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: .5rem;
+  }
+  .ready pre {
+    margin: .6rem 0 0;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: .6rem;
+    overflow: auto;
+  }
+  .ready .hint { color: #d4dcef; margin: .3rem 0; }
   .card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

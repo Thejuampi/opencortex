@@ -1,0 +1,47 @@
+name: install-smoke
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  unix-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer script
+        run: |
+          chmod +x docs/install
+          OPENCORTEX_REPO="${{ github.repository }}" sh docs/install
+      - name: Verify health and config
+        run: |
+          test -x "$HOME/.local/bin/opencortex" || test -x "/usr/local/bin/opencortex"
+          test -f "$HOME/.opencortex/server"
+          URL="$(cat "$HOME/.opencortex/server")"
+          curl -fsSL "$URL/healthz" >/dev/null
+          test -f "$HOME/.codex/config.toml"
+
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run installer script
+        shell: pwsh
+        run: |
+          $env:OPENCORTEX_REPO = "${{ github.repository }}"
+          ./docs/install.ps1
+      - name: Verify health and config
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:USERPROFILE ".opencortex\bin\opencortex.exe"
+          if (-not (Test-Path $bin)) { throw "binary not installed" }
+          $serverPath = Join-Path $env:USERPROFILE ".opencortex\server"
+          if (-not (Test-Path $serverPath)) { throw "server file missing" }
+          $url = (Get-Content $serverPath | Select-Object -First 1).Trim()
+          Invoke-WebRequest -Uri "$url/healthz" -UseBasicParsing | Out-Null
+          if (-not (Test-Path (Join-Path $env:USERPROFILE ".codex\config.toml"))) { throw "codex config missing" }

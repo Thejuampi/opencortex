@@ -1,0 +1,111 @@
+#!/usr/bin/env sh
+set -eu
+
+REPO="${OPENCORTEX_REPO:-Thejuampi/opencortex}"
+BASE_PAGES="${OPENCORTEX_PAGES_URL:-https://thejuampi.github.io/opencortex}"
+API_BASE="https://api.github.com/repos/${REPO}"
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing required command: $1" >&2
+    exit 1
+  }
+}
+
+need_cmd curl
+need_cmd tar
+
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$os" in
+  darwin) os="darwin" ;;
+  linux) os="linux" ;;
+  *) echo "unsupported OS: $os" >&2; exit 1 ;;
+esac
+case "$arch" in
+  x86_64|amd64) arch="amd64" ;;
+  arm64|aarch64) arch="arm64" ;;
+  *) echo "unsupported arch: $arch" >&2; exit 1 ;;
+esac
+
+tag="$(curl -fsSL "${API_BASE}/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+[ -n "$tag" ] || { echo "could not resolve latest release tag" >&2; exit 1; }
+
+asset="opencortex_${os}_${arch}.tar.gz"
+checksums="checksums.txt"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+echo "Downloading OpenCortex ${tag}..."
+curl -fsSL -o "${tmpdir}/${asset}" "https://github.com/${REPO}/releases/download/${tag}/${asset}"
+curl -fsSL -o "${tmpdir}/${checksums}" "https://github.com/${REPO}/releases/download/${tag}/${checksums}"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$tmpdir" && sha256sum -c --ignore-missing "${checksums}")
+elif command -v shasum >/dev/null 2>&1; then
+  expected="$(grep " ${asset}\$" "${tmpdir}/${checksums}" | awk '{print $1}')"
+  actual="$(shasum -a 256 "${tmpdir}/${asset}" | awk '{print $1}')"
+  [ "$expected" = "$actual" ] || { echo "checksum mismatch" >&2; exit 1; }
+else
+  echo "warning: checksum verification skipped (sha256sum/shasum missing)" >&2
+fi
+
+tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
+
+install_dir="/usr/local/bin"
+if [ ! -w "$install_dir" ]; then
+  install_dir="${HOME}/.local/bin"
+  mkdir -p "$install_dir"
+fi
+
+cp "${tmpdir}/opencortex" "${install_dir}/opencortex"
+chmod +x "${install_dir}/opencortex"
+
+case ":$PATH:" in
+  *":${install_dir}:"*) ;;
+  *)
+    shell_name="$(basename "${SHELL:-sh}")"
+    rc="${HOME}/.profile"
+    [ "$shell_name" = "zsh" ] && rc="${HOME}/.zshrc"
+    [ "$shell_name" = "bash" ] && rc="${HOME}/.bashrc"
+    [ "$shell_name" = "fish" ] && rc="${HOME}/.config/fish/config.fish"
+    if [ "$shell_name" = "fish" ]; then
+      grep -q "set -gx PATH ${install_dir} \$PATH" "$rc" 2>/dev/null || echo "set -gx PATH ${install_dir} \$PATH" >> "$rc"
+    else
+      grep -q "export PATH=\"${install_dir}:\$PATH\"" "$rc" 2>/dev/null || echo "export PATH=\"${install_dir}:\$PATH\"" >> "$rc"
+    fi
+    export PATH="${install_dir}:$PATH"
+  ;;
+esac
+
+echo "Bootstrapping OpenCortex..."
+opencortex init --all --silent || true
+
+if pgrep -f "opencortex server" >/dev/null 2>&1; then
+  :
+else
+  nohup opencortex server >/tmp/opencortex.log 2>&1 &
+fi
+
+ready_url=""
+for _ in $(seq 1 30); do
+  ready_url="$(cat "${HOME}/.opencortex/server" 2>/dev/null || true)"
+  [ -z "$ready_url" ] && ready_url="http://localhost:8080"
+  if curl -fsS "${ready_url}/healthz" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+if [ -n "$ready_url" ]; then
+  if command -v open >/dev/null 2>&1; then
+    open "$ready_url" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$ready_url" >/dev/null 2>&1 || true
+  fi
+fi
+
+echo ""
+echo "✓ OpenCortex is ready."
+echo "  Dashboard -> ${ready_url:-http://localhost:8080}"
+echo "  Manual setup -> ${BASE_PAGES}/manual-setup.html"
