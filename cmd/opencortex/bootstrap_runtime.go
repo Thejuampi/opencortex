@@ -84,6 +84,9 @@ func runBootstrap(ctx context.Context, cfgPath string, cfg config.Config, opts b
 	contextPath, contextErr := bootstrap.EnsureAgentContextSnippet(serverURL)
 
 	vscodeOK := state.VSCodeExtensionInstalled
+	if bootstrap.DetectVSCodePresence() {
+		vscodeOK = true
+	}
 	if opts.All || opts.VSCodeOnly {
 		installed, err := bootstrap.TryInstallVSCodeExtension(ctx)
 		if err != nil && !opts.Silent {

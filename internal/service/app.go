@@ -147,6 +147,10 @@ func (a *App) Authorize(authCtx AuthContext, resource, action string) error {
 }
 
 func (a *App) CreateAgent(ctx context.Context, in repos.CreateAgentInput, keyKind string, assignRole string) (model.Agent, string, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return model.Agent{}, "", fmt.Errorf("%w: name is required", ErrValidation)
+	}
 	raw, hash, err := auth.GenerateAPIKey(keyKind)
 	if err != nil {
 		return model.Agent{}, "", err
@@ -157,6 +161,9 @@ func (a *App) CreateAgent(ctx context.Context, in repos.CreateAgentInput, keyKin
 	in.APIKeyHash = hash
 	agent, err := a.Store.CreateAgent(ctx, in)
 	if err != nil {
+		if isAgentNameConflictErr(err) {
+			return model.Agent{}, "", fmt.Errorf("%w: agent name %q already exists", ErrConflict, in.Name)
+		}
 		return model.Agent{}, "", err
 	}
 	role := assignRole
@@ -175,6 +182,15 @@ func (a *App) CreateAgent(ctx context.Context, in repos.CreateAgentInput, keyKin
 	default:
 	}
 	return agent, raw, nil
+}
+
+func isAgentNameConflictErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique") &&
+		(strings.Contains(msg, "agents.name") || strings.Contains(msg, "idx_agents_name_ci"))
 }
 
 func (a *App) RotateAgentKey(ctx context.Context, agentID, kind string) (string, error) {
@@ -196,6 +212,7 @@ func (a *App) AutoRegisterLocal(ctx context.Context, name, fingerprint string) (
 	if strings.TrimSpace(name) == "" {
 		name = "local-agent"
 	}
+	baseName := name
 
 	// If fingerprint provided, try to find existing agent.
 	if fingerprint != "" {
@@ -212,16 +229,30 @@ func (a *App) AutoRegisterLocal(ctx context.Context, name, fingerprint string) (
 		// err == sql.ErrNoRows → fall through to create
 	}
 
-	agent, raw, err := a.CreateAgent(ctx, repos.CreateAgentInput{
-		Name:        name,
-		Type:        model.AgentTypeAI,
-		Fingerprint: fingerprint,
-		Description: "Auto-registered local agent",
-		Status:      model.AgentStatusActive,
-		Tags:        []string{"auto"},
-		Metadata:    map[string]any{"source": "auto"},
-	}, "live", "")
-	return agent, raw, err
+	const maxAttempts = 32
+	for i := 0; i < maxAttempts; i++ {
+		candidate := baseName
+		if i > 0 {
+			candidate = fmt.Sprintf("%s-%d", baseName, i+1)
+		}
+		agent, raw, err := a.CreateAgent(ctx, repos.CreateAgentInput{
+			Name:        candidate,
+			Type:        model.AgentTypeAI,
+			Fingerprint: fingerprint,
+			Description: "Auto-registered local agent",
+			Status:      model.AgentStatusActive,
+			Tags:        []string{"auto"},
+			Metadata:    map[string]any{"source": "auto"},
+		}, "live", "")
+		if err == nil {
+			return agent, raw, nil
+		}
+		if !errors.Is(err, ErrConflict) {
+			return model.Agent{}, "", err
+		}
+	}
+
+	return model.Agent{}, "", fmt.Errorf("%w: could not allocate unique auto-register name", ErrConflict)
 }
 
 func (a *App) CreateTopic(ctx context.Context, in repos.CreateTopicInput) (model.Topic, error) {

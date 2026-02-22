@@ -1603,7 +1603,8 @@ func newKnowledgeCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
-			if err := client.do(http.MethodGet, "/api/v1/knowledge?q="+args[0], nil, &out); err != nil {
+			path := "/api/v1/knowledge?q=" + url.QueryEscape(args[0])
+			if err := client.do(http.MethodGet, path, nil, &out); err != nil {
 				return err
 			}
 			return printJSON(out)

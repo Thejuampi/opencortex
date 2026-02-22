@@ -207,7 +207,7 @@ Local server URL: %s
 }
 
 func TryInstallVSCodeExtension(ctx context.Context) (bool, error) {
-	codePath, err := exec.LookPath("code")
+	codePath, err := findVSCodeCLI()
 	if err != nil {
 		return false, nil
 	}
@@ -216,6 +216,62 @@ func TryInstallVSCodeExtension(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("install vscode extension: %w: %s", runErr, strings.TrimSpace(string(out)))
 	}
 	return true, nil
+}
+
+func DetectVSCodePresence() bool {
+	if strings.TrimSpace(os.Getenv("VSCODE_IPC_HOOK_CLI")) != "" {
+		return true
+	}
+	if _, err := findVSCodeCLI(); err == nil {
+		return true
+	}
+	home := HomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return fileExists("/Applications/Visual Studio Code.app") ||
+			fileExists("/Applications/Visual Studio Code - Insiders.app") ||
+			fileExists(filepath.Join(home, "Applications", "Visual Studio Code.app")) ||
+			fileExists(filepath.Join(home, "Applications", "Visual Studio Code - Insiders.app")) ||
+			fileExists(filepath.Join(home, ".vscode"))
+	case "linux":
+		return fileExists(filepath.Join(home, ".config", "Code")) ||
+			fileExists(filepath.Join(home, ".config", "Code - Insiders")) ||
+			fileExists(filepath.Join(home, ".vscode"))
+	case "windows":
+		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+		appData := strings.TrimSpace(os.Getenv("APPDATA"))
+		return fileExists(filepath.Join(localAppData, "Programs", "Microsoft VS Code", "Code.exe")) ||
+			fileExists(filepath.Join(localAppData, "Programs", "Microsoft VS Code Insiders", "Code - Insiders.exe")) ||
+			fileExists(filepath.Join(localAppData, "Programs", "VSCodium", "VSCodium.exe")) ||
+			fileExists(filepath.Join(appData, "Code")) ||
+			fileExists(filepath.Join(appData, "Code - Insiders")) ||
+			fileExists(filepath.Join(home, ".vscode"))
+	default:
+		return false
+	}
+}
+
+func findVSCodeCLI() (string, error) {
+	candidates := []string{"code", "code.cmd", "code-insiders", "code-insiders.cmd", "codium", "codium.cmd"}
+	for _, name := range candidates {
+		if p, err := exec.LookPath(name); err == nil {
+			return p, nil
+		}
+	}
+	if runtime.GOOS == "windows" {
+		localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+		paths := []string{
+			filepath.Join(localAppData, "Programs", "Microsoft VS Code", "bin", "code.cmd"),
+			filepath.Join(localAppData, "Programs", "Microsoft VS Code Insiders", "bin", "code-insiders.cmd"),
+			filepath.Join(localAppData, "Programs", "VSCodium", "bin", "codium.cmd"),
+		}
+		for _, p := range paths {
+			if fileExists(p) {
+				return p, nil
+			}
+		}
+	}
+	return "", errors.New("vscode cli not found")
 }
 
 func ConfigureAutostart(binaryPath, cfgPath string) (bool, error) {
@@ -236,6 +292,7 @@ func CurrentStatus() Status {
 	configPath := ManagedConfigPath()
 	cfgPresent := fileExists(configPath)
 	dbPresent := fileExists(ManagedDBPath())
+	vscodeDetected := DetectVSCodePresence()
 	status := Status{
 		ConfigPath:               configPath,
 		DBPath:                   ManagedDBPath(),
@@ -246,7 +303,7 @@ func CurrentStatus() Status {
 		DBPresent:                dbPresent,
 		CopilotMCPConfigured:     state.CopilotMCPConfigured,
 		CodexMCPConfigured:       state.CodexMCPConfigured,
-		VSCodeExtensionInstalled: state.VSCodeExtensionInstalled,
+		VSCodeExtensionInstalled: state.VSCodeExtensionInstalled || vscodeDetected,
 		AutostartConfigured:      state.AutostartConfigured,
 		AgentContextPath:         state.AgentContextPath,
 	}
