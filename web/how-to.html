@@ -386,10 +386,10 @@
 
   <!-- Platform tabs -->
   <div class="platform-tabs">
-    <div class="tab active" onclick="switchTab('mac', this)">macOS</div>
-    <div class="tab" onclick="switchTab('linux', this)">Linux</div>
-    <div class="tab" onclick="switchTab('windows', this)">Windows</div>
-    <div class="tab" onclick="switchTab('manual', this)">Manual</div>
+    <div class="tab active" data-main-tab="mac" onclick="switchTab('mac', this)">macOS</div>
+    <div class="tab" data-main-tab="linux" onclick="switchTab('linux', this)">Linux</div>
+    <div class="tab" data-main-tab="windows" onclick="switchTab('windows', this)">Windows</div>
+    <div class="tab" data-main-tab="manual" onclick="switchTab('manual', this)">Manual</div>
   </div>
 
   <!-- macOS -->
@@ -514,9 +514,9 @@
       </div>
       <div class="section-label" style="margin-top:24px">Manual steps</div>
       <div class="manual-subtabs">
-        <div class="manual-subtab active" onclick="switchManualTab('mac', this)">macOS</div>
-        <div class="manual-subtab" onclick="switchManualTab('linux', this)">Linux</div>
-        <div class="manual-subtab" onclick="switchManualTab('windows', this)">Windows</div>
+        <div class="manual-subtab active" data-manual-tab="mac" onclick="switchManualTab('mac', this)">macOS</div>
+        <div class="manual-subtab" data-manual-tab="linux" onclick="switchManualTab('linux', this)">Linux</div>
+        <div class="manual-subtab" data-manual-tab="windows" onclick="switchManualTab('windows', this)">Windows</div>
       </div>
 
       <div class="manual-os-content active" id="manual-os-mac">
@@ -789,19 +789,73 @@ opencortex status</code>
 </div><!-- /page -->
 
 <script>
-  // Tab switching
-  function switchTab(name, el) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.platform-content').forEach(c => c.classList.remove('active'));
-    el.classList.add('active');
-    document.getElementById('tab-' + name).classList.add('active');
+  const MAIN_TABS = ['mac', 'linux', 'windows', 'manual'];
+  const MANUAL_TABS = ['mac', 'linux', 'windows'];
+  let currentMainTab = 'mac';
+  let currentManualTab = 'mac';
+
+  function normalizeMain(name) {
+    return MAIN_TABS.includes(name) ? name : 'mac';
   }
 
-  function switchManualTab(name, el) {
-    document.querySelectorAll('.manual-subtab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.manual-os-content').forEach(c => c.classList.remove('active'));
-    el.classList.add('active');
-    document.getElementById('manual-os-' + name).classList.add('active');
+  function normalizeManual(name) {
+    return MANUAL_TABS.includes(name) ? name : 'mac';
+  }
+
+  function updateHash() {
+    const params = new URLSearchParams();
+    params.set('main', currentMainTab);
+    if (currentMainTab === 'manual') {
+      params.set('manual', currentManualTab);
+    }
+    const nextHash = '#' + params.toString();
+    if (window.location.hash !== nextHash) {
+      history.replaceState(null, '', nextHash);
+    }
+  }
+
+  function applyState(main, manual, syncHash) {
+    currentMainTab = normalizeMain(main);
+    currentManualTab = normalizeManual(manual);
+
+    document.querySelectorAll('.tab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.mainTab === currentMainTab);
+    });
+    document.querySelectorAll('.platform-content').forEach((c) => c.classList.remove('active'));
+    const activeMainPanel = document.getElementById('tab-' + currentMainTab);
+    if (activeMainPanel) activeMainPanel.classList.add('active');
+
+    document.querySelectorAll('.manual-subtab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.manualTab === currentManualTab);
+    });
+    document.querySelectorAll('.manual-os-content').forEach((c) => c.classList.remove('active'));
+    const activeManualPanel = document.getElementById('manual-os-' + currentManualTab);
+    if (activeManualPanel) activeManualPanel.classList.add('active');
+
+    if (syncHash) updateHash();
+  }
+
+  function parseHashAndApply() {
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+    if (!hash) {
+      applyState('mac', 'mac', true);
+      return;
+    }
+    const params = new URLSearchParams(hash);
+    const main = params.get('main');
+    const manual = params.get('manual');
+    applyState(main || hash, manual || 'mac', false);
+  }
+
+  function switchTab(name) {
+    const nextMain = normalizeMain(name);
+    const nextManual = currentManualTab;
+    applyState(nextMain, nextManual, true);
+  }
+
+  function switchManualTab(name) {
+    const nextManual = normalizeManual(name);
+    applyState('manual', nextManual, true);
   }
 
   // Copy buttons
@@ -815,6 +869,9 @@ opencortex status</code>
       }, 2000);
     });
   }
+
+  window.addEventListener('hashchange', parseHashAndApply);
+  parseHashAndApply();
 
   // Mermaid init
   mermaid.initialize({
