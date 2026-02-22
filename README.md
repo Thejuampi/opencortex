@@ -1,6 +1,6 @@
 # Opencortex
 
-[![CI](https://github.com/Thejuampi/opencortex/actions/workflows/ci.yml/badge.svg)](https://github.com/Thejuampi/opencortex/actions/workflows/ci.yml)
+[![Status](https://img.shields.io/badge/status-bootstrap-0ea5e9)](https://github.com/Thejuampi/opencortex)
 [![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev/)
