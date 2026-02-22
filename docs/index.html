@@ -6,102 +6,252 @@
   <title>OpenCortex - Zero Friction Setup</title>
   <style>
     :root {
-      --bg0: #0c1325;
-      --bg1: #132040;
-      --fg: #f8fbff;
-      --muted: #b2c3df;
-      --accent: #ffcb59;
-      --accent2: #42d4c8;
-      --card: rgba(255,255,255,.08);
-      --line: rgba(255,255,255,.15);
+      --bg-0: #05080f;
+      --bg-1: #0b1221;
+      --bg-2: #0f1b33;
+      --text: #e8eefc;
+      --muted: #8fa5c8;
+      --accent: #27d7c6;
+      --line: rgba(114, 145, 198, 0.24);
+      --panel: rgba(14, 25, 46, 0.75);
+      --panel-strong: rgba(12, 22, 40, 0.94);
+      --radius: 18px;
     }
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
     body {
       margin: 0;
-      font-family: "Space Grotesk", "Segoe UI", sans-serif;
-      color: var(--fg);
-      background: radial-gradient(1200px 600px at 0% 0%, #203a73 0%, var(--bg0) 58%),
-                  radial-gradient(900px 500px at 100% 100%, #0f7a74 0%, transparent 65%),
-                  var(--bg1);
+      font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1000px 500px at 6% -8%, rgba(39, 215, 198, 0.2), transparent 70%),
+        radial-gradient(900px 520px at 100% 100%, rgba(55, 120, 226, 0.18), transparent 65%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
       min-height: 100vh;
     }
-    .wrap { max-width: 1060px; margin: 0 auto; padding: 2rem 1rem 3rem; }
-    .hero, .card {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--card);
-      backdrop-filter: blur(8px);
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 2.5rem 1rem 3rem;
     }
-    .hero { padding: 1.4rem; }
-    h1 { margin: 0 0 .6rem; font-size: clamp(1.6rem, 3.8vw, 2.8rem); }
-    p { color: var(--muted); line-height: 1.55; }
-    .cmd {
-      margin-top: .8rem;
+    .backglow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(700px 300px at 50% 22%, rgba(39, 215, 198, 0.14), transparent 70%);
+      filter: blur(24px);
+      opacity: 0.9;
+    }
+    .hero, .suite {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 22px 56px rgba(2, 7, 14, 0.55);
+    }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 2rem;
+    }
+    .eyebrow {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.74rem;
+      margin: 0 0 .8rem;
+    }
+    h1 {
+      margin: 0;
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      font-size: clamp(2rem, 6.2vw, 4.4rem);
+      text-wrap: balance;
+      max-width: 12ch;
+    }
+    .subtitle {
+      margin: 1rem 0 0;
+      max-width: 62ch;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.6vw, 1.2rem);
+      line-height: 1.58;
+    }
+    .primary-command {
+      margin-top: 1.5rem;
       display: flex;
-      gap: .6rem;
+      gap: .8rem;
       align-items: center;
       flex-wrap: wrap;
-      background: rgba(0,0,0,.28);
+      background: linear-gradient(180deg, rgba(8, 18, 34, 0.9), rgba(4, 10, 20, 0.95));
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: .7rem .8rem;
+      border-radius: 14px;
+      padding: .85rem .95rem;
+      position: relative;
+      z-index: 1;
     }
-    code { font-family: "IBM Plex Mono", Consolas, monospace; color: var(--accent2); }
+    .primary-command::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      background: linear-gradient(120deg, rgba(39, 215, 198, 0.35), transparent 25%, transparent 75%, rgba(39, 215, 198, 0.28));
+      z-index: -1;
+      filter: blur(8px);
+      opacity: 0.6;
+    }
+    code {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      color: #d7fff8;
+      font-size: .95rem;
+      line-height: 1.45;
+      word-break: break-all;
+    }
     button {
-      border: 0;
+      border: 1px solid rgba(39, 215, 198, 0.35);
       border-radius: 999px;
-      padding: .46rem .85rem;
+      padding: .5rem .9rem;
       font-weight: 700;
       cursor: pointer;
-      background: var(--accent);
-      color: #1d2437;
+      background: rgba(39, 215, 198, 0.12);
+      color: var(--text);
+      transition: transform .16s ease, border-color .16s ease, background .16s ease;
     }
-    .grid {
+    button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(39, 215, 198, 0.58);
+      background: rgba(39, 215, 198, 0.2);
+    }
+    .suite {
+      margin-top: 1.2rem;
+      padding: .8rem;
+    }
+    .suite-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: .9rem;
-      margin-top: 1rem;
+      gap: .7rem;
     }
-    .card { padding: 1rem; }
-    .tabs { display: flex; gap: .4rem; margin-top: .5rem; }
-    .tab { border: 1px solid var(--line); background: transparent; color: var(--fg); }
-    .tab.active { background: var(--accent); color: #192236; }
-    .muted-link { color: #b9d7ff; }
+    .cell {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel-strong);
+      padding: 1rem;
+      min-height: 174px;
+      display: flex;
+      flex-direction: column;
+      gap: .65rem;
+    }
+    .cell h3 {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+    }
+    .cell p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.52;
+      font-size: .96rem;
+    }
+    .mini-command {
+      margin-top: auto;
+      border: 1px solid rgba(114, 145, 198, 0.22);
+      border-radius: 10px;
+      background: rgba(6, 12, 24, 0.72);
+      padding: .58rem .62rem;
+    }
+    .tabs {
+      display: inline-flex;
+      gap: .35rem;
+      margin-top: .1rem;
+    }
+    .tab {
+      font-size: .86rem;
+      border-color: rgba(114, 145, 198, 0.32);
+      padding: .38rem .66rem;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .tab.active {
+      border-color: rgba(39, 215, 198, 0.58);
+      background: rgba(39, 215, 198, 0.18);
+      color: #dbfffb;
+    }
+    .muted-link {
+      color: #b9d9ff;
+      text-decoration: none;
+      font-weight: 600;
+      margin-top: auto;
+    }
+    .muted-link:hover {
+      color: #def0ff;
+      text-decoration: underline;
+    }
+    .grid-label {
+      margin: 0 0 .75rem;
+      color: var(--muted);
+      font-size: .82rem;
+      text-transform: uppercase;
+      letter-spacing: .11em;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+    }
+    @media (max-width: 640px) {
+      .hero {
+        padding: 1.35rem;
+      }
+      h1 {
+        font-size: clamp(1.9rem, 13vw, 2.7rem);
+      }
+      .primary-command {
+        padding: .76rem;
+      }
+      button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
+  <div class="backglow"></div>
   <div class="wrap">
     <section class="hero">
+      <p class="eyebrow">Local-first multi-agent infra</p>
       <h1>OpenCortex in one command.</h1>
-      <p>Zero friction means zero manual setup. Install, auto-configure MCP, start server, and open dashboard.</p>
-      <div class="cmd">
+      <p class="subtitle">Zero friction means zero manual setup. Install, configure MCP, start the server, and launch the dashboard in one move.</p>
+      <div class="primary-command">
         <code id="install-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code>
-        <button id="copy-install">Copy</button>
+        <button id="copy-install">Copy command</button>
       </div>
     </section>
 
-    <div class="grid">
-      <section class="card">
+    <section class="suite">
+      <p class="grid-label">Get running fast</p>
+      <div class="suite-grid">
+      <section class="cell">
         <h3>Tell your agent to run this</h3>
-        <div class="cmd">
+        <p>Drop this straight into an agent session to bootstrap OpenCortex automatically.</p>
+        <div class="mini-command">
           <code id="agent-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code>
-          <button id="copy-agent">Copy</button>
         </div>
+        <button id="copy-agent">Copy agent command</button>
       </section>
-      <section class="card">
+      <section class="cell">
         <h3>Platform commands</h3>
+        <p>Use the exact installer command for your current shell environment.</p>
         <div class="tabs">
           <button class="tab active" data-target="unix">macOS/Linux</button>
           <button class="tab" data-target="win">Windows</button>
         </div>
-        <div class="cmd"><code id="platform-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code></div>
+        <div class="mini-command"><code id="platform-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code></div>
       </section>
-      <section class="card">
+      <section class="cell">
         <h3>Need manual setup?</h3>
-        <p>Use the fallback manual instructions if your environment blocks automatic writes.</p>
+        <p>For locked-down environments, use the manual fallback flow and recover quickly.</p>
         <a class="muted-link" href="./manual-setup.html">Open manual setup</a>
       </section>
-    </div>
+      </div>
+    </section>
   </div>
 
   <script>
