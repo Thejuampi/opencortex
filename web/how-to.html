@@ -6,21 +6,23 @@
   <title>How to Install — OpenCortex</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
 
   <style>
     :root {
-      --bg:         #0d1117;
-      --bg-card:    #161b22;
-      --bg-code:    #0d1117;
-      --border:     rgba(255,255,255,0.08);
-      --border-hi:  rgba(99,102,241,0.4);
+      --bg:         #05080f;
+      --bg-top:     #0b1221;
+      --bg-card:    rgba(14, 25, 46, 0.75);
+      --bg-card-2:  rgba(12, 22, 40, 0.94);
+      --bg-code:    rgba(6, 12, 24, 0.78);
+      --border:     rgba(114,145,198,0.24);
+      --border-hi:  rgba(99,102,241,0.48);
       --accent:     #6366f1;
       --accent-dim: rgba(99,102,241,0.15);
-      --text:       #e6edf3;
-      --text-muted: #7d8590;
-      --text-dim:   #484f58;
+      --text:       #e8eefc;
+      --text-muted: #8fa5c8;
+      --text-dim:   #5f7598;
       --green:      #3fb950;
       --yellow:     #d29922;
       --red:        #f85149;
@@ -29,9 +31,12 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: var(--bg);
+      background:
+        radial-gradient(1000px 500px at 6% -8%, rgba(99, 102, 241, 0.22), transparent 70%),
+        radial-gradient(900px 520px at 100% 100%, rgba(55, 120, 226, 0.18), transparent 65%),
+        linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
       color: var(--text);
-      font-family: 'DM Sans', sans-serif;
+      font-family: 'Space Grotesk', 'Avenir Next', 'Segoe UI', sans-serif;
       font-size: 15px;
       line-height: 1.7;
       min-height: 100vh;
@@ -43,10 +48,10 @@
       align-items: center;
       gap: 12px;
       padding: 18px 40px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid rgba(114,145,198,0.18);
       position: sticky;
       top: 0;
-      background: rgba(13,17,23,0.92);
+      background: rgba(7,12,23,0.82);
       backdrop-filter: blur(12px);
       z-index: 100;
     }
@@ -69,7 +74,7 @@
     .page {
       max-width: 972px;
       margin: 0 auto;
-      padding: 60px 40px 100px;
+      padding: 56px 40px 100px;
     }
 
     /* ── HEADER ── */
@@ -77,7 +82,7 @@
       margin-bottom: 56px;
     }
     .page-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'IBM Plex Mono', Consolas, monospace;
       font-size: 11px;
       letter-spacing: 0.14em;
       color: var(--accent);
@@ -85,18 +90,18 @@
       margin-bottom: 16px;
     }
     h1 {
-      font-family: 'Syne', sans-serif;
-      font-size: clamp(32px, 5vw, 48px);
-      font-weight: 800;
-      line-height: 1.1;
+      font-size: clamp(2rem, 6.2vw, 4.1rem);
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
       color: var(--text);
       margin-bottom: 16px;
     }
     .page-desc {
-      font-size: 16px;
+      font-size: 1.05rem;
       color: var(--text-muted);
-      max-width: 560px;
-      line-height: 1.65;
+      max-width: 62ch;
+      line-height: 1.58;
     }
 
     /* ── PLATFORM TABS ── */
@@ -104,7 +109,7 @@
       display: flex;
       gap: 4px;
       margin-bottom: 32px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid rgba(114,145,198,0.24);
       padding-bottom: 0;
     }
     .tab {
@@ -129,7 +134,7 @@
       margin-bottom: 48px;
     }
     .section-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'IBM Plex Mono', Consolas, monospace;
       font-size: 10px;
       letter-spacing: 0.16em;
       color: var(--text-dim);
@@ -144,9 +149,9 @@
       gap: 12px;
     }
     .step {
-      background: var(--bg-card);
+      background: var(--bg-card-2);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 14px;
       padding: 20px 24px;
       display: grid;
       grid-template-columns: 32px 1fr;
@@ -164,7 +169,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'IBM Plex Mono', Consolas, monospace;
       font-size: 12px;
       font-weight: 500;
       color: var(--accent);
@@ -189,7 +194,7 @@
     .code-block {
       background: var(--bg-code);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 14px 16px;
       display: flex;
       align-items: center;
@@ -199,7 +204,7 @@
       max-width: 100%;
     }
     .code-block code {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'IBM Plex Mono', Consolas, monospace;
       font-size: 13px;
       color: #a5d6ff;
       white-space: pre-wrap;
@@ -217,7 +222,7 @@
       border: 1px solid var(--border-hi);
       color: var(--accent);
       font-size: 11px;
-      font-family: 'DM Sans', sans-serif;
+      font-family: 'Space Grotesk', sans-serif;
       font-weight: 500;
       letter-spacing: 0.04em;
       padding: 5px 12px;
@@ -247,12 +252,12 @@
     .diagram-wrapper {
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 32px 24px;
       margin-bottom: 48px;
     }
     .diagram-title {
-      font-family: 'Syne', sans-serif;
+      font-family: 'Space Grotesk', sans-serif;
       font-size: 15px;
       font-weight: 700;
       color: var(--text);
@@ -318,7 +323,7 @@
       margin-bottom: 10px;
     }
     .agent-note-title {
-      font-family: 'Syne', sans-serif;
+      font-family: 'Space Grotesk', sans-serif;
       font-size: 17px;
       font-weight: 700;
       margin-bottom: 10px;
