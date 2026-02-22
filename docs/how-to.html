@@ -128,6 +128,28 @@
 
     .platform-content { display: none; }
     .platform-content.active { display: block; }
+    .manual-subtabs {
+      display: flex;
+      gap: 6px;
+      margin: 0 0 18px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .manual-subtab {
+      padding: 8px 14px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      user-select: none;
+      transition: color .15s, border-color .15s;
+    }
+    .manual-subtab:hover { color: var(--text); }
+    .manual-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .manual-os-content { display: none; }
+    .manual-os-content.active { display: block; }
 
     /* ── SECTION ── */
     .section {
@@ -364,10 +386,10 @@
 
   <!-- Platform tabs -->
   <div class="platform-tabs">
-    <div class="tab active" onclick="switchTab('mac')">macOS</div>
-    <div class="tab" onclick="switchTab('linux')">Linux</div>
-    <div class="tab" onclick="switchTab('windows')">Windows</div>
-    <div class="tab" onclick="switchTab('manual')">Manual</div>
+    <div class="tab active" onclick="switchTab('mac', this)">macOS</div>
+    <div class="tab" onclick="switchTab('linux', this)">Linux</div>
+    <div class="tab" onclick="switchTab('windows', this)">Windows</div>
+    <div class="tab" onclick="switchTab('manual', this)">Manual</div>
   </div>
 
   <!-- macOS -->
@@ -491,55 +513,146 @@
         <span>Use this path only if automatic installation fails due to permission restrictions or network policies.</span>
       </div>
       <div class="section-label" style="margin-top:24px">Manual steps</div>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-body">
-            <div class="step-title">Download the binary for your platform</div>
-            <div class="code-block">
-              <code># macOS (Apple Silicon)
-curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex
+      <div class="manual-subtabs">
+        <div class="manual-subtab active" onclick="switchManualTab('mac', this)">macOS</div>
+        <div class="manual-subtab" onclick="switchManualTab('linux', this)">Linux</div>
+        <div class="manual-subtab" onclick="switchManualTab('windows', this)">Windows</div>
+      </div>
 
-# macOS (Intel)
-curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-amd64 -o opencortex
-
-# Linux (amd64)
-curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex
-
-# Windows
-# Download opencortex-windows-amd64.exe from the releases page</code>
-              <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex')">Copy</button>
+      <div class="manual-os-content active" id="manual-os-mac">
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title">Download the binary</div>
+              <div class="step-desc">Use Apple Silicon build by default. If you're on Intel, swap to <code style="font-family:'IBM Plex Mono',Consolas,monospace;font-size:12px;color:#a5d6ff">opencortex-darwin-amd64</code>.</div>
+              <div class="code-block">
+                <code>curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex</code>
+                <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">Make executable and move to PATH</div>
+              <div class="code-block">
+                <code>chmod +x opencortex && sudo mv opencortex /usr/local/bin/</code>
+                <button class="copy-btn" onclick="copy(this, 'chmod +x opencortex && sudo mv opencortex /usr/local/bin/')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">Initialize and configure</div>
+              <div class="code-block">
+                <code>opencortex init --all</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <div class="step-title">Start the server</div>
+              <div class="code-block">
+                <code>opencortex server</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex server')">Copy</button>
+              </div>
             </div>
           </div>
         </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-body">
-            <div class="step-title">Make it executable and move to PATH</div>
-            <div class="code-block">
-              <code>chmod +x opencortex && sudo mv opencortex /usr/local/bin/</code>
-              <button class="copy-btn" onclick="copy(this, 'chmod +x opencortex && sudo mv opencortex /usr/local/bin/')">Copy</button>
+      </div>
+
+      <div class="manual-os-content" id="manual-os-linux">
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title">Download the binary</div>
+              <div class="code-block">
+                <code>curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex</code>
+                <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">Make executable and move to PATH</div>
+              <div class="code-block">
+                <code>chmod +x opencortex && sudo mv opencortex /usr/local/bin/</code>
+                <button class="copy-btn" onclick="copy(this, 'chmod +x opencortex && sudo mv opencortex /usr/local/bin/')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">Initialize and configure</div>
+              <div class="code-block">
+                <code>opencortex init --all</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <div class="step-title">Start the server</div>
+              <div class="code-block">
+                <code>opencortex server</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex server')">Copy</button>
+              </div>
             </div>
           </div>
         </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-body">
-            <div class="step-title">Initialize and configure</div>
-            <div class="code-block">
-              <code>opencortex init --all</code>
-              <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+      </div>
+
+      <div class="manual-os-content" id="manual-os-windows">
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title">Download the binary</div>
+              <div class="code-block">
+                <code>Invoke-WebRequest -Uri https://thejuampi.github.io/opencortex/releases/opencortex-windows-amd64.exe -OutFile opencortex.exe</code>
+                <button class="copy-btn" onclick="copy(this, 'Invoke-WebRequest -Uri https://thejuampi.github.io/opencortex/releases/opencortex-windows-amd64.exe -OutFile opencortex.exe')">Copy</button>
+              </div>
             </div>
-            <div class="step-desc" style="margin-top:10px">This writes MCP configs for Copilot and Codex, installs the VSCode extension if detected, and creates the local database.</div>
           </div>
-        </div>
-        <div class="step">
-          <div class="step-num">4</div>
-          <div class="step-body">
-            <div class="step-title">Start the server</div>
-            <div class="code-block">
-              <code>opencortex server</code>
-              <button class="copy-btn" onclick="copy(this, 'opencortex server')">Copy</button>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">Move binary to a PATH directory</div>
+              <div class="code-block">
+                <code>$bin = "$env:USERPROFILE/.opencortex/bin"
+New-Item -ItemType Directory -Force $bin
+Move-Item .\opencortex.exe "$bin/opencortex.exe" -Force
+setx PATH "$($env:Path);$bin"</code>
+                <button class="copy-btn" onclick="copy(this, '$bin = \"$env:USERPROFILE/.opencortex/bin\"\nNew-Item -ItemType Directory -Force $bin\nMove-Item .\\opencortex.exe \"$bin/opencortex.exe\" -Force\nsetx PATH \"$($env:Path);$bin\"')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">Initialize and configure</div>
+              <div class="code-block">
+                <code>opencortex init --all</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <div class="step-title">Start the server</div>
+              <div class="code-block">
+                <code>opencortex server</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex server')">Copy</button>
+              </div>
             </div>
           </div>
         </div>
@@ -677,11 +790,18 @@ opencortex status</code>
 
 <script>
   // Tab switching
-  function switchTab(name) {
+  function switchTab(name, el) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.platform-content').forEach(c => c.classList.remove('active'));
-    event.target.classList.add('active');
+    el.classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  function switchManualTab(name, el) {
+    document.querySelectorAll('.manual-subtab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.manual-os-content').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('manual-os-' + name).classList.add('active');
   }
 
   // Copy buttons
