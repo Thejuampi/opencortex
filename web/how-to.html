@@ -197,18 +197,19 @@
       gap: 12px;
       margin-top: 10px;
       max-width: 100%;
-      overflow: hidden;
     }
     .code-block code {
       font-family: 'JetBrains Mono', monospace;
       font-size: 13px;
       color: #a5d6ff;
-      white-space: pre;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       display: block;
       flex: 1 1 auto;
       min-width: 0;
       max-width: 100%;
-      overflow-x: auto;
+      overflow-x: hidden;
     }
     .copy-btn {
       flex-shrink: 0;
