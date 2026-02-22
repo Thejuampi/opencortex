@@ -20,6 +20,21 @@ type Config struct {
 		WriteTimeout string   `yaml:"write_timeout"`
 		CORSOrigins  []string `yaml:"cors_origins"`
 	} `yaml:"server"`
+	MCP struct {
+		Enabled bool `yaml:"enabled"`
+		HTTP    struct {
+			Enabled bool   `yaml:"enabled"`
+			Path    string `yaml:"path"`
+		} `yaml:"http"`
+		Delivery struct {
+			DefaultLeaseSeconds int `yaml:"default_lease_seconds"`
+			MaxLeaseSeconds     int `yaml:"max_lease_seconds"`
+		} `yaml:"delivery"`
+		Tools struct {
+			FullParity  bool `yaml:"full_parity"`
+			ExposeAdmin bool `yaml:"expose_admin"`
+		} `yaml:"tools"`
+	} `yaml:"mcp"`
 	Database struct {
 		Path           string `yaml:"path"`
 		WALMode        bool   `yaml:"wal_mode"`
@@ -82,6 +97,13 @@ func Default() Config {
 	cfg.Server.ReadTimeout = "30s"
 	cfg.Server.WriteTimeout = "30s"
 	cfg.Server.CORSOrigins = []string{"http://localhost:3000"}
+	cfg.MCP.Enabled = true
+	cfg.MCP.HTTP.Enabled = true
+	cfg.MCP.HTTP.Path = "/mcp"
+	cfg.MCP.Delivery.DefaultLeaseSeconds = 300
+	cfg.MCP.Delivery.MaxLeaseSeconds = 3600
+	cfg.MCP.Tools.FullParity = true
+	cfg.MCP.Tools.ExposeAdmin = true
 	cfg.Database.Path = "./opencortex.db"
 	cfg.Database.WALMode = true
 	cfg.Database.MaxConnections = 10
@@ -155,6 +177,15 @@ func overrideFromEnv(cfg *Config) {
 			cfg.Server.Port = i
 		}
 	}
+	if v := os.Getenv("OPENCORTEX_MCP_ENABLED"); v != "" {
+		cfg.MCP.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("OPENCORTEX_MCP_HTTP_ENABLED"); v != "" {
+		cfg.MCP.HTTP.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("OPENCORTEX_MCP_HTTP_PATH"); v != "" {
+		cfg.MCP.HTTP.Path = v
+	}
 	if v := os.Getenv("OPENCORTEX_DB_PATH"); v != "" {
 		cfg.Database.Path = v
 	}
@@ -174,6 +205,15 @@ func validate(cfg Config) error {
 	}
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		return errors.New("invalid server.port")
+	}
+	if strings.TrimSpace(cfg.MCP.HTTP.Path) == "" || cfg.MCP.HTTP.Path[0] != '/' {
+		return errors.New("mcp.http.path must start with '/'")
+	}
+	if cfg.MCP.Delivery.DefaultLeaseSeconds <= 0 {
+		return errors.New("mcp.delivery.default_lease_seconds must be > 0")
+	}
+	if cfg.MCP.Delivery.MaxLeaseSeconds < cfg.MCP.Delivery.DefaultLeaseSeconds {
+		return errors.New("mcp.delivery.max_lease_seconds must be >= mcp.delivery.default_lease_seconds")
 	}
 	if cfg.Database.Path == "" {
 		return errors.New("database.path is required")

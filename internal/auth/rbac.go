@@ -22,6 +22,8 @@ var defaultRolePermissions = map[string][]PermissionKey{
 		{Resource: "agents", Action: "read"},
 		{Resource: "topics", Action: "read"},
 		{Resource: "topics", Action: "write"},
+		{Resource: "groups", Action: "read"},
+		{Resource: "groups", Action: "write"},
 		{Resource: "messages", Action: "read"},
 		{Resource: "messages", Action: "write"},
 		{Resource: "knowledge", Action: "read"},
@@ -32,6 +34,7 @@ var defaultRolePermissions = map[string][]PermissionKey{
 	"readonly": {
 		{Resource: "agents", Action: "read"},
 		{Resource: "topics", Action: "read"},
+		{Resource: "groups", Action: "read"},
 		{Resource: "messages", Action: "read"},
 		{Resource: "knowledge", Action: "read"},
 		{Resource: "collections", Action: "read"},

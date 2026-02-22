@@ -25,6 +25,8 @@ type Message struct {
 	FromAgentID string    `json:"from_agent_id"`
 	ToAgentID   *string   `json:"to_agent_id,omitempty"`
 	TopicID     *string   `json:"topic_id,omitempty"`
+	ToGroupID   *string   `json:"to_group_id,omitempty"`
+	QueueMode   bool      `json:"queue_mode"`
 	ContentType string    `json:"content_type"`
 	Content     string    `json:"content"`
 	Priority    Priority  `json:"priority"`
@@ -34,11 +36,28 @@ type Message struct {
 type PublishRequest struct {
 	TopicID     string
 	ToAgentID   string
+	ToGroupID   string
+	QueueMode   bool
 	ReplyToID   string
 	ContentType string
 	Content     string
 	Priority    Priority
 	Tags        []string
+}
+
+type ClaimRequest struct {
+	Limit        int
+	TopicID      string
+	FromAgentID  string
+	Priority     Priority
+	LeaseSeconds int
+}
+
+type ClaimedMessage struct {
+	Message        Message   `json:"message"`
+	ClaimToken     string    `json:"claim_token"`
+	ClaimExpiresAt time.Time `json:"claim_expires_at"`
+	ClaimAttempts  int       `json:"claim_attempts"`
 }
 
 type MessagesService struct {
@@ -58,6 +77,10 @@ func (s *MessagesService) Publish(ctx context.Context, req PublishRequest) (Mess
 	if req.ToAgentID != "" {
 		body["to_agent_id"] = req.ToAgentID
 	}
+	if req.ToGroupID != "" {
+		body["to_group_id"] = req.ToGroupID
+		body["queue_mode"] = req.QueueMode
+	}
 	if req.ReplyToID != "" {
 		body["reply_to_id"] = req.ReplyToID
 	}
@@ -72,6 +95,56 @@ func (s *MessagesService) Publish(ctx context.Context, req PublishRequest) (Mess
 
 func (s *MessagesService) MarkRead(ctx context.Context, messageID string) error {
 	return s.client.do(ctx, http.MethodPost, "/api/v1/messages/"+messageID+"/read", map[string]any{}, nil)
+}
+
+func (s *MessagesService) Claim(ctx context.Context, req ClaimRequest) ([]ClaimedMessage, error) {
+	body := map[string]any{
+		"limit":         req.Limit,
+		"lease_seconds": req.LeaseSeconds,
+	}
+	if req.TopicID != "" {
+		body["topic_id"] = req.TopicID
+	}
+	if req.FromAgentID != "" {
+		body["from_agent_id"] = req.FromAgentID
+	}
+	if req.Priority != "" {
+		body["priority"] = req.Priority
+	}
+	var out struct {
+		Claims []ClaimedMessage `json:"claims"`
+	}
+	if err := s.client.do(ctx, http.MethodPost, "/api/v1/messages/claim", body, &out); err != nil {
+		return nil, err
+	}
+	return out.Claims, nil
+}
+
+func (s *MessagesService) Ack(ctx context.Context, messageID, claimToken string, markRead bool) error {
+	return s.client.do(ctx, http.MethodPost, "/api/v1/messages/"+messageID+"/ack", map[string]any{
+		"claim_token": claimToken,
+		"mark_read":   markRead,
+	}, nil)
+}
+
+func (s *MessagesService) Nack(ctx context.Context, messageID, claimToken, reason string) error {
+	return s.client.do(ctx, http.MethodPost, "/api/v1/messages/"+messageID+"/nack", map[string]any{
+		"claim_token": claimToken,
+		"reason":      reason,
+	}, nil)
+}
+
+func (s *MessagesService) Renew(ctx context.Context, messageID, claimToken string, leaseSeconds int) (time.Time, error) {
+	var out struct {
+		ClaimExpiresAt time.Time `json:"claim_expires_at"`
+	}
+	if err := s.client.do(ctx, http.MethodPost, "/api/v1/messages/"+messageID+"/renew", map[string]any{
+		"claim_token":   claimToken,
+		"lease_seconds": leaseSeconds,
+	}, &out); err != nil {
+		return time.Time{}, err
+	}
+	return out.ClaimExpiresAt, nil
 }
 
 func (s *MessagesService) Subscribe(ctx context.Context, topicID string) (<-chan Message, error) {

@@ -28,6 +28,7 @@ import (
 	ws "opencortex/internal/api/websocket"
 	"opencortex/internal/broker"
 	"opencortex/internal/config"
+	mcpbridge "opencortex/internal/mcp"
 	"opencortex/internal/model"
 	"opencortex/internal/service"
 	"opencortex/internal/storage"
@@ -128,6 +129,7 @@ func main() {
 
 	root.AddCommand(newInitCommand(&cfgPath))
 	root.AddCommand(newServerCommand(&cfgPath))
+	root.AddCommand(newMCPServerCommand(&cfgPath))
 	root.AddCommand(newConfigCommand(&cfgPath))
 	root.AddCommand(newAuthCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newAgentsCommand(&baseURL, &apiKey, &asJSON))
@@ -181,7 +183,11 @@ func newInitCommand(cfgPath *string) *cobra.Command {
 }
 
 func newServerCommand(cfgPath *string) *cobra.Command {
-	return &cobra.Command{
+	var (
+		mcpHTTPEnabled bool
+		mcpHTTPPath    string
+	)
+	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run opencortex server",
 		Example: strings.TrimSpace(`
@@ -191,6 +197,12 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 			cfg, err := loadConfigMaybe(*cfgPath)
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("mcp-http-enabled") {
+				cfg.MCP.HTTP.Enabled = mcpHTTPEnabled
+			}
+			if cmd.Flags().Changed("mcp-http-path") && strings.TrimSpace(mcpHTTPPath) != "" {
+				cfg.MCP.HTTP.Path = strings.TrimSpace(mcpHTTPPath)
 			}
 			ctx := context.Background()
 			db, err := storage.Open(ctx, cfg)
@@ -206,6 +218,9 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 			}
 			memBroker := broker.NewMemory(cfg.Broker.ChannelBufferSize)
 			app := service.New(cfg, store, memBroker)
+			if _, err := app.EnsureBroadcastSetup(ctx, ""); err != nil && !errors.Is(err, service.ErrNotFound) {
+				return err
+			}
 			syncEngine := syncer.NewEngine(db, store)
 			handler := handlers.New(app, db, cfg, syncEngine)
 			hub := ws.NewHub(app, store)
@@ -232,10 +247,21 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 			}
 
 			apiRouter := api.NewRouter(handler, app, hub)
+			var mcpHTTPHandler http.Handler
+			if cfg.MCP.Enabled && cfg.MCP.HTTP.Enabled {
+				mcpBridge := mcpbridge.New(mcpbridge.Options{
+					App:    app,
+					Config: cfg,
+					Router: apiRouter,
+				})
+				mcpHTTPHandler = mcpBridge.HTTPHandler()
+			}
 			uiAssets := webui.FS()
 			uiFS := http.FileServer(http.FS(uiAssets))
 			serverMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
+				case mcpHTTPHandler != nil && strings.HasPrefix(r.URL.Path, cfg.MCP.HTTP.Path):
+					mcpHTTPHandler.ServeHTTP(w, r)
 				case strings.HasPrefix(r.URL.Path, "/api/"), r.URL.Path == "/healthz":
 					apiRouter.ServeHTTP(w, r)
 				default:
@@ -266,6 +292,81 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 			return httpServer.ListenAndServe()
 		},
 	}
+	cmd.Flags().BoolVar(&mcpHTTPEnabled, "mcp-http-enabled", true, "Enable MCP streamable HTTP endpoint")
+	cmd.Flags().StringVar(&mcpHTTPPath, "mcp-http-path", "", "Override MCP streamable HTTP endpoint path")
+	return cmd
+}
+
+func newMCPServerCommand(cfgPath *string) *cobra.Command {
+	var (
+		apiKey   string
+		agentID  string
+		logLevel string
+	)
+	cmd := &cobra.Command{
+		Use:   "mcp-server",
+		Short: "Run Opencortex MCP server over stdio",
+		Example: strings.TrimSpace(`
+  opencortex mcp-server --config ./config.yaml --api-key amk_live_xxx
+  opencortex mcp-server --config ./config.yaml --api-key amk_live_xxx --agent-id <agent-id>`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigMaybe(*cfgPath)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(logLevel) != "" {
+				cfg.Logging.Level = strings.TrimSpace(logLevel)
+			}
+			if !cfg.MCP.Enabled {
+				return errors.New("mcp is disabled in config")
+			}
+
+			ctx := context.Background()
+			db, err := storage.Open(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			if err := storage.Migrate(ctx, db); err != nil {
+				return err
+			}
+			store := repos.New(db)
+			if err := store.SeedRBAC(ctx); err != nil {
+				return err
+			}
+			memBroker := broker.NewMemory(cfg.Broker.ChannelBufferSize)
+			app := service.New(cfg, store, memBroker)
+			if _, err := app.EnsureBroadcastSetup(ctx, ""); err != nil && !errors.Is(err, service.ErrNotFound) {
+				return err
+			}
+			syncEngine := syncer.NewEngine(db, store)
+			handler := handlers.New(app, db, cfg, syncEngine)
+			hub := ws.NewHub(app, store)
+			apiRouter := api.NewRouter(handler, app, hub)
+
+			effectiveKey := strings.TrimSpace(apiKey)
+			if effectiveKey == "" {
+				effectiveKey = strings.TrimSpace(cfg.Auth.AdminKey)
+			}
+			if effectiveKey == "" {
+				return errors.New("api key is required for stdio mode (use --api-key or set auth.admin_key)")
+			}
+
+			mcpBridge := mcpbridge.New(mcpbridge.Options{
+				App:            app,
+				Config:         cfg,
+				Router:         apiRouter,
+				DefaultAPIKey:  effectiveKey,
+				DefaultAgentID: strings.TrimSpace(agentID),
+			})
+			log.Printf("opencortex mcp-server started (stdio)")
+			return mcpBridge.ServeStdio()
+		},
+	}
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "Default API key used by stdio MCP calls")
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "Optional expected agent ID for the API key")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "Optional log level override")
+	return cmd
 }
 
 func newConfigCommand(cfgPath *string) *cobra.Command {
@@ -276,6 +377,7 @@ func newConfigCommand(cfgPath *string) *cobra.Command {
 Configuration scheme overview:
   mode: local | server | hybrid
   server: host/port/timeouts/cors
+  mcp: stdio/http transport, lease defaults, tool exposure
   database: sqlite path, WAL, pool, backup
   auth: toggle auth and admin bootstrap key
   broker: channel buffer, TTL default, max message size
@@ -288,6 +390,9 @@ Environment overrides:
   OPENCORTEX_MODE
   OPENCORTEX_SERVER_HOST
   OPENCORTEX_SERVER_PORT
+  OPENCORTEX_MCP_ENABLED
+  OPENCORTEX_MCP_HTTP_ENABLED
+  OPENCORTEX_MCP_HTTP_PATH
   OPENCORTEX_DB_PATH
   OPENCORTEX_AUTH_ENABLED
   AGENTMESH_ADMIN_KEY`),
@@ -346,6 +451,13 @@ Environment overrides:
 			cfg.Server.ReadTimeout = prompt(reader, "server.read_timeout", cfg.Server.ReadTimeout)
 			cfg.Server.WriteTimeout = prompt(reader, "server.write_timeout", cfg.Server.WriteTimeout)
 			cfg.Server.CORSOrigins = promptCSV(reader, "server.cors_origins (comma-separated)", cfg.Server.CORSOrigins)
+			cfg.MCP.Enabled = promptBool(reader, "mcp.enabled", cfg.MCP.Enabled)
+			cfg.MCP.HTTP.Enabled = promptBool(reader, "mcp.http.enabled", cfg.MCP.HTTP.Enabled)
+			cfg.MCP.HTTP.Path = prompt(reader, "mcp.http.path", cfg.MCP.HTTP.Path)
+			cfg.MCP.Delivery.DefaultLeaseSeconds = promptInt(reader, "mcp.delivery.default_lease_seconds", cfg.MCP.Delivery.DefaultLeaseSeconds)
+			cfg.MCP.Delivery.MaxLeaseSeconds = promptInt(reader, "mcp.delivery.max_lease_seconds", cfg.MCP.Delivery.MaxLeaseSeconds)
+			cfg.MCP.Tools.FullParity = promptBool(reader, "mcp.tools.full_parity", cfg.MCP.Tools.FullParity)
+			cfg.MCP.Tools.ExposeAdmin = promptBool(reader, "mcp.tools.expose_admin", cfg.MCP.Tools.ExposeAdmin)
 
 			cfg.Database.Path = prompt(reader, "database.path", cfg.Database.Path)
 			cfg.Database.WALMode = promptBool(reader, "database.wal_mode", cfg.Database.WALMode)
@@ -480,13 +592,13 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 			}
 			if *asJSON {
 				type entry struct {
-					BaseURL    string    `json:"base_url"`
-					AgentID    string    `json:"agent_id,omitempty"`
-					AgentName  string    `json:"agent_name,omitempty"`
-					Roles      []string  `json:"roles,omitempty"`
-					UpdatedAt  time.Time `json:"updated_at"`
-					HasToken   bool      `json:"has_token"`
-					IsCurrent  bool      `json:"is_current"`
+					BaseURL   string    `json:"base_url"`
+					AgentID   string    `json:"agent_id,omitempty"`
+					AgentName string    `json:"agent_name,omitempty"`
+					Roles     []string  `json:"roles,omitempty"`
+					UpdatedAt time.Time `json:"updated_at"`
+					HasToken  bool      `json:"has_token"`
+					IsCurrent bool      `json:"is_current"`
 				}
 				out := make([]entry, 0, len(store.Accounts))
 				for k, v := range store.Accounts {
@@ -688,7 +800,7 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get <id>",
 		Short: "Get agent details",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -701,7 +813,7 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "rotate-key <id>",
 		Short: "Rotate an agent API key",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -726,7 +838,7 @@ func newKnowledgeCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "search <query>",
 		Short: "Search knowledge entries",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -775,7 +887,7 @@ func newKnowledgeCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "get <id>",
 		Short: "Get a knowledge entry",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -867,7 +979,7 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	addRemote := &cobra.Command{
 		Use:   "add <name> <url>",
 		Short: "Add a sync remote",
-		Args: cobra.ExactArgs(2),
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -919,7 +1031,7 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "diff <remote>",
 		Short: "Preview sync changes for a remote",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -945,7 +1057,7 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	resolveCmd := &cobra.Command{
 		Use:   "resolve <conflict-id>",
 		Short: "Resolve a sync conflict",
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -973,7 +1085,7 @@ func syncPushPullCommand(kind string, baseURL, apiKey *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   kind + " <remote>",
 		Short: short,
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAPIClient(*baseURL, *apiKey)
 			var out map[string]any
@@ -1273,7 +1385,7 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 
 	if cmd.CommandPath() == "opencortex" {
 		fmt.Fprintf(b, "%sWHAT YOU CAN DO%s\n", sectionColor(), ansiReset)
-		fmt.Fprintf(b, "  %sLifecycle%s: initialize local state, run API+WS+UI server\n", ansiGreen, ansiReset)
+		fmt.Fprintf(b, "  %sLifecycle%s: initialize local state, run API+WS+UI/MCP server\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sAgents%s: register, inspect, rotate keys\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sKnowledge%s: add, search, version, export/import entries\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sSync%s: configure remotes, diff, push/pull, resolve conflicts\n", ansiGreen, ansiReset)
@@ -1310,6 +1422,9 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(b, "    opencortex init --config ./config.yaml\n")
 		fmt.Fprintf(b, "    opencortex server --config ./config.yaml\n")
 		fmt.Fprintf(b, "    # open http://localhost:8080\n\n")
+
+		fmt.Fprintf(b, "  %sRun MCP stdio server%s\n", ansiGray, ansiReset)
+		fmt.Fprintf(b, "    opencortex mcp-server --config ./config.yaml --api-key <key>\n\n")
 
 		fmt.Fprintf(b, "  %sPush first knowledge item%s\n", ansiGray, ansiReset)
 		fmt.Fprintf(b, "    opencortex knowledge add --title \"System Scope\" --file ./scope.md --tags scope,mvp --api-key <key>\n")

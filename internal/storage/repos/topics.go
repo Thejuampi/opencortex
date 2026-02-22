@@ -84,6 +84,13 @@ FROM topics WHERE id = ?`, id)
 	return scanTopic(row)
 }
 
+func (s *Store) GetTopicByName(ctx context.Context, name string) (model.Topic, error) {
+	row := s.DB.QueryRowContext(ctx, `
+SELECT id, name, description, retention, ttl_seconds, created_by, is_public, created_at
+FROM topics WHERE name = ?`, name)
+	return scanTopic(row)
+}
+
 func (s *Store) UpdateTopic(ctx context.Context, id string, description *string, retention *string, ttlSeconds *int, isPublic *bool) (model.Topic, error) {
 	set := []string{}
 	args := []any{}
@@ -123,6 +130,14 @@ func (s *Store) Subscribe(ctx context.Context, agentID, topicID string, filter m
 	_, err := s.DB.ExecContext(ctx, `
 INSERT OR IGNORE INTO subscriptions(agent_id, topic_id, filter, created_at)
 VALUES (?, ?, ?, ?)`, agentID, topicID, toJSON(filter), nowUTC().Format(timeFormat))
+	return err
+}
+
+func (s *Store) SubscribeAllAgents(ctx context.Context, topicID string) error {
+	_, err := s.DB.ExecContext(ctx, `
+INSERT OR IGNORE INTO subscriptions(agent_id, topic_id, filter, created_at)
+SELECT id, ?, '{}', ?
+FROM agents`, topicID, nowUTC().Format(timeFormat))
 	return err
 }
 

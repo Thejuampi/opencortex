@@ -52,10 +52,25 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 			protected.With(apimw.RequirePermission(app, "topics", "manage")).Delete("/topics/{id}/members/{agent_id}", server.RemoveTopicMember)
 			protected.With(apimw.RequirePermission(app, "topics", "read")).Get("/topics/{id}/members", server.ListTopicMembers)
 
+			// Groups
+			protected.With(apimw.RequirePermission(app, "groups", "write")).Post("/groups", server.CreateGroup)
+			protected.With(apimw.RequirePermission(app, "groups", "read")).Get("/groups", server.ListGroups)
+			protected.With(apimw.RequirePermission(app, "groups", "read")).Get("/groups/{id}", server.GetGroup)
+			protected.With(apimw.RequirePermission(app, "groups", "write")).Patch("/groups/{id}", server.UpdateGroup)
+			protected.With(apimw.RequirePermission(app, "groups", "manage")).Delete("/groups/{id}", server.DeleteGroup)
+			protected.With(apimw.RequirePermission(app, "groups", "write")).Post("/groups/{id}/members", server.AddGroupMember)
+			protected.With(apimw.RequirePermission(app, "groups", "manage")).Delete("/groups/{id}/members/{agent_id}", server.RemoveGroupMember)
+			protected.With(apimw.RequirePermission(app, "groups", "read")).Get("/groups/{id}/members", server.ListGroupMembers)
+
 			// Messages
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages", server.CreateMessage)
+			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/broadcast", server.BroadcastMessage)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages", server.Inbox)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages/{id}", server.GetMessage)
+			protected.With(apimw.RequirePermission(app, "messages", "read")).Post("/messages/claim", server.ClaimMessages)
+			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/ack", server.AckMessageClaim)
+			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/nack", server.NackMessageClaim)
+			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/renew", server.RenewMessageClaim)
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/read", server.MarkRead)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages/{id}/thread", server.MessageThread)
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Delete("/messages/{id}", server.DeleteMessage)

@@ -1,0 +1,100 @@
+{
+  "name": "opencortex-vscode",
+  "displayName": "OpenCortex Bridge",
+  "description": "OpenCortex reactive bridge for Copilot and Codex workflows",
+  "version": "0.1.0",
+  "publisher": "opencortex",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "*",
+    "onCommand:opencortex.connect",
+    "onCommand:opencortex.claimNow"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "opencortex.connect",
+        "title": "OpenCortex: Connect"
+      },
+      {
+        "command": "opencortex.claimNow",
+        "title": "OpenCortex: Claim Messages Now"
+      },
+      {
+        "command": "opencortex.markDone",
+        "title": "OpenCortex: Mark Claim Done"
+      },
+      {
+        "command": "opencortex.nackClaim",
+        "title": "OpenCortex: Nack Active Claim"
+      }
+    ],
+    "configuration": {
+      "title": "OpenCortex",
+      "properties": {
+        "opencortex.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Base URL of the OpenCortex server"
+        },
+        "opencortex.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key used for REST and WebSocket authentication"
+        },
+        "opencortex.agentName": {
+          "type": "string",
+          "default": "",
+          "description": "Stable agent profile name for this VSCode client"
+        },
+        "opencortex.agentTags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "vscode"
+          ],
+          "description": "Tags announced by this bridge"
+        },
+        "opencortex.autoInjectPriority": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "normal",
+            "low"
+          ],
+          "default": "high",
+          "description": "Minimum priority that auto-injects into chat"
+        },
+        "opencortex.topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Topic IDs to subscribe on connect"
+        },
+        "opencortex.reconnectIntervalMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 200,
+          "description": "WebSocket reconnect interval in milliseconds"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test ./test/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -81,6 +81,8 @@ type Message struct {
 	FromAgentID string          `json:"from_agent_id"`
 	ToAgentID   *string         `json:"to_agent_id,omitempty"`
 	TopicID     *string         `json:"topic_id,omitempty"`
+	ToGroupID   *string         `json:"to_group_id,omitempty"`
+	QueueMode   bool            `json:"queue_mode"`
 	ReplyToID   *string         `json:"reply_to_id,omitempty"`
 	ContentType string          `json:"content_type"`
 	Content     string          `json:"content"`
@@ -99,6 +101,31 @@ type Subscription struct {
 	TopicID   string         `json:"topic_id"`
 	Filter    map[string]any `json:"filter,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+type GroupMode string
+
+const (
+	GroupModeFanout GroupMode = "fanout"
+	GroupModeQueue  GroupMode = "queue"
+)
+
+type Group struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Mode        GroupMode      `json:"mode"`
+	CreatedBy   string         `json:"created_by"`
+	Metadata    map[string]any `json:"metadata"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
+type GroupMember struct {
+	GroupID  string    `json:"group_id"`
+	AgentID  string    `json:"agent_id"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joined_at"`
+	Agent    Agent     `json:"agent"`
 }
 
 type KnowledgeVisibility string

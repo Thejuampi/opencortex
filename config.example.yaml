@@ -8,6 +8,18 @@ server:
   cors_origins:
     - "http://localhost:3000"
 
+mcp:
+  enabled: true
+  http:
+    enabled: true
+    path: "/mcp"
+  delivery:
+    default_lease_seconds: 300
+    max_lease_seconds: 3600
+  tools:
+    full_parity: true
+    expose_admin: true
+
 database:
   path: "./opencortex.db"
   wal_mode: true
@@ -44,4 +56,3 @@ logging:
   level: "info"
   format: "json"
   file: ""
-

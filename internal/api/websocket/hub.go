@@ -30,6 +30,7 @@ type client struct {
 	auth        service.AuthContext
 	writeMu     sync.Mutex
 	topicCancel map[string]context.CancelFunc
+	mailboxStop context.CancelFunc
 }
 
 func NewHub(app *service.App, store *repos.Store) *Hub {
@@ -94,6 +95,8 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	_ = c.write(map[string]any{"type": "ack", "ok": true, "ref_id": "connected"})
+	c.startMailbox()
+	_ = c.subscribeTopic(service.SystemBroadcastTopicID)
 	for {
 		_, b, err := conn.ReadMessage()
 		if err != nil {
@@ -150,6 +153,9 @@ func (h *Hub) register(c *client) {
 func (h *Hub) unregister(c *client) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if c.mailboxStop != nil {
+		c.mailboxStop()
+	}
 	for _, cancel := range c.topicCancel {
 		cancel()
 	}
@@ -193,6 +199,10 @@ func (c *client) subscribeTopic(topicID string) error {
 				if !ok {
 					return
 				}
+				_ = c.write(map[string]any{
+					"type": "message_available",
+					"data": messageHint(msg),
+				})
 				_ = c.write(map[string]any{"type": "message", "data": msg})
 			}
 		}
@@ -243,4 +253,46 @@ func (c *client) send(payload map[string]any) (model.Message, error) {
 		return model.Message{}, err
 	}
 	return msg, nil
+}
+
+func (c *client) startMailbox() {
+	if c.mailboxStop != nil {
+		return
+	}
+	ch, err := c.app.Broker.GetMailbox(context.Background(), c.auth.Agent.ID)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.mailboxStop = cancel
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				_ = c.write(map[string]any{
+					"type": "message_available",
+					"data": messageHint(msg),
+				})
+				_ = c.write(map[string]any{"type": "message", "data": msg})
+			}
+		}
+	}()
+}
+
+func messageHint(msg model.Message) map[string]any {
+	return map[string]any{
+		"id":            msg.ID,
+		"from_agent_id": msg.FromAgentID,
+		"to_agent_id":   msg.ToAgentID,
+		"topic_id":      msg.TopicID,
+		"priority":      msg.Priority,
+		"reply_to_id":   msg.ReplyToID,
+		"metadata":      msg.Metadata,
+		"created_at":    msg.CreatedAt,
+	}
 }

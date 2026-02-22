@@ -25,6 +25,8 @@ func (s *Store) Stats(ctx context.Context) (map[string]int, error) {
 	tables := []string{
 		"agents",
 		"topics",
+		"groups",
+		"group_members",
 		"messages",
 		"message_receipts",
 		"knowledge_entries",

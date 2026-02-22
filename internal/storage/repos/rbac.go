@@ -32,6 +32,7 @@ INSERT OR IGNORE INTO roles(id, name, description) VALUES (?, ?, ?)`, newID(), r
 	}{
 		{"agents", "read"}, {"agents", "write"}, {"agents", "manage"},
 		{"topics", "read"}, {"topics", "write"}, {"topics", "manage"},
+		{"groups", "read"}, {"groups", "write"}, {"groups", "manage"},
 		{"messages", "read"}, {"messages", "write"}, {"messages", "manage"},
 		{"knowledge", "read"}, {"knowledge", "write"}, {"knowledge", "manage"},
 		{"collections", "read"}, {"collections", "write"}, {"collections", "manage"},

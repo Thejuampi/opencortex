@@ -3,6 +3,7 @@ package repos
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,8 @@ type CreateMessageInput struct {
 	FromAgentID string
 	ToAgentID   *string
 	TopicID     *string
+	ToGroupID   *string
+	QueueMode   bool
 	ReplyToID   *string
 	ContentType string
 	Content     string
@@ -33,6 +36,24 @@ type MessageFilters struct {
 	Since       string
 	Page        int
 	PerPage     int
+}
+
+var ErrClaimNotFound = errors.New("claim_not_found")
+
+type ClaimMessagesInput struct {
+	AgentID      string
+	Limit        int
+	TopicID      string
+	FromAgentID  string
+	Priority     string
+	LeaseSeconds int
+}
+
+type ClaimedMessage struct {
+	Message        model.Message `json:"message"`
+	ClaimToken     string        `json:"claim_token"`
+	ClaimExpiresAt time.Time     `json:"claim_expires_at"`
+	ClaimAttempts  int           `json:"claim_attempts"`
 }
 
 func (s *Store) CreateMessageWithRecipients(ctx context.Context, in CreateMessageInput, recipients []string) (model.Message, error) {
@@ -60,13 +81,15 @@ func (s *Store) CreateMessageWithRecipients(ctx context.Context, in CreateMessag
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO messages(
-  id, from_agent_id, to_agent_id, topic_id, reply_to_id, content_type, content, status, priority,
+  id, from_agent_id, to_agent_id, topic_id, to_group_id, queue_mode, reply_to_id, content_type, content, status, priority,
   tags, metadata, created_at, expires_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.ID,
 		in.FromAgentID,
 		in.ToAgentID,
 		in.TopicID,
+		in.ToGroupID,
+		boolToInt(in.QueueMode),
 		in.ReplyToID,
 		in.ContentType,
 		in.Content,
@@ -100,6 +123,16 @@ VALUES (?, ?, ?, 'pending', ?)`,
 			return model.Message{}, err
 		}
 	}
+	if in.QueueMode && in.ToGroupID != nil {
+		_, err := tx.ExecContext(ctx, `
+INSERT INTO message_receipts(id, message_id, agent_id, status, created_at)
+VALUES (?, ?, NULL, 'pending', ?)`,
+			newID(), in.ID, now.Format(timeFormat))
+		if err != nil {
+			_ = tx.Rollback()
+			return model.Message{}, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return model.Message{}, err
@@ -109,7 +142,7 @@ VALUES (?, ?, ?, 'pending', ?)`,
 
 func (s *Store) GetMessageByID(ctx context.Context, id string) (model.Message, error) {
 	row := s.DB.QueryRowContext(ctx, `
-SELECT id, from_agent_id, to_agent_id, topic_id, reply_to_id, content_type, content,
+SELECT id, from_agent_id, to_agent_id, topic_id, to_group_id, queue_mode, reply_to_id, content_type, content,
        status, priority, tags, metadata, created_at, expires_at, delivered_at, read_at
 FROM messages
 WHERE id = ?`, id)
@@ -170,7 +203,7 @@ JOIN messages m ON m.id = mr.message_id
 	}
 
 	query := `
-SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.reply_to_id, m.content_type, m.content,
+SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.to_group_id, m.queue_mode, m.reply_to_id, m.content_type, m.content,
        mr.status, m.priority, m.tags, m.metadata, m.created_at, m.expires_at, mr.delivered_at, mr.read_at
 FROM message_receipts mr
 JOIN messages m ON m.id = mr.message_id
@@ -207,7 +240,7 @@ func (s *Store) ListMessagesByTopic(ctx context.Context, topicID string, page, p
 		return nil, 0, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-SELECT id, from_agent_id, to_agent_id, topic_id, reply_to_id, content_type, content,
+SELECT id, from_agent_id, to_agent_id, topic_id, to_group_id, queue_mode, reply_to_id, content_type, content,
        status, priority, tags, metadata, created_at, expires_at, delivered_at, read_at
 FROM messages
 WHERE topic_id = ?
@@ -265,6 +298,308 @@ WHERE message_id = ? AND agent_id = ?`, now, messageID, agentID)
 	return err
 }
 
+func (s *Store) ClaimMessages(ctx context.Context, in ClaimMessagesInput) ([]ClaimedMessage, error) {
+	if strings.TrimSpace(in.AgentID) == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if in.Limit <= 0 {
+		in.Limit = 1
+	}
+	if in.LeaseSeconds <= 0 {
+		in.LeaseSeconds = 300
+	}
+
+	now := nowUTC()
+	nowTS := now.Format(timeFormat)
+	leaseExpiry := now.Add(time.Duration(in.LeaseSeconds) * time.Second)
+	leaseExpiryTS := leaseExpiry.Format(timeFormat)
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	where := `WHERE mr.status = 'pending'
+  AND (mr.claim_expires_at IS NULL OR mr.claim_expires_at <= ?)
+  AND (m.expires_at IS NULL OR m.expires_at > ?)
+  AND (
+    mr.agent_id = ?
+    OR (
+      m.queue_mode = 1
+      AND EXISTS (
+        SELECT 1 FROM group_members gm
+        WHERE gm.group_id = m.to_group_id AND gm.agent_id = ?
+      )
+    )
+  )`
+	args := []any{nowTS, nowTS, in.AgentID, in.AgentID}
+	if in.TopicID != "" {
+		where += " AND m.topic_id = ?"
+		args = append(args, in.TopicID)
+	}
+	if in.FromAgentID != "" {
+		where += " AND m.from_agent_id = ?"
+		args = append(args, in.FromAgentID)
+	}
+	if in.Priority != "" {
+		where += " AND m.priority = ?"
+		args = append(args, in.Priority)
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+SELECT mr.message_id, mr.agent_id, m.queue_mode
+FROM message_receipts mr
+JOIN messages m ON m.id = mr.message_id
+`+where+`
+ORDER BY m.created_at ASC
+LIMIT ?`, append(args, in.Limit)...)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	defer rows.Close()
+
+	type claimCandidate struct {
+		MessageID string
+		AgentID   sql.NullString
+		QueueMode int
+	}
+	var candidates []claimCandidate
+	for rows.Next() {
+		var c claimCandidate
+		if err := rows.Scan(&c.MessageID, &c.AgentID, &c.QueueMode); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+
+	out := make([]ClaimedMessage, 0, len(candidates))
+	for _, candidate := range candidates {
+		token := newID()
+		var (
+			res sql.Result
+			err error
+		)
+		if candidate.QueueMode == 1 {
+			res, err = tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET agent_id = ?,
+    claim_token = ?,
+    claim_expires_at = ?,
+    claim_attempts = claim_attempts + 1,
+    last_claimed_at = ?,
+    last_error = NULL
+WHERE message_id = ?
+  AND status = 'pending'
+  AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
+  AND EXISTS (
+    SELECT 1 FROM messages m
+    JOIN group_members gm ON gm.group_id = m.to_group_id
+    WHERE m.id = message_receipts.message_id
+      AND m.queue_mode = 1
+      AND gm.agent_id = ?
+  )
+`, in.AgentID, token, leaseExpiryTS, nowTS, candidate.MessageID, nowTS, in.AgentID)
+		} else if candidate.AgentID.Valid {
+			res, err = tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET claim_token = ?,
+    claim_expires_at = ?,
+    claim_attempts = claim_attempts + 1,
+    last_claimed_at = ?,
+    last_error = NULL
+WHERE message_id = ?
+  AND agent_id = ?
+  AND status = 'pending'
+  AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
+`, token, leaseExpiryTS, nowTS, candidate.MessageID, in.AgentID, nowTS)
+		} else {
+			res, err = tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET agent_id = ?,
+    claim_token = ?,
+    claim_expires_at = ?,
+    claim_attempts = claim_attempts + 1,
+    last_claimed_at = ?,
+    last_error = NULL
+WHERE message_id = ?
+  AND agent_id IS NULL
+  AND status = 'pending'
+  AND (claim_expires_at IS NULL OR claim_expires_at <= ?)
+  AND EXISTS (
+    SELECT 1 FROM messages m
+    JOIN group_members gm ON gm.group_id = m.to_group_id
+    WHERE m.id = message_receipts.message_id
+      AND m.queue_mode = 1
+      AND gm.agent_id = ?
+  )
+`, in.AgentID, token, leaseExpiryTS, nowTS, candidate.MessageID, nowTS, in.AgentID)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+
+		msg, err := s.getMessageForAgentTx(ctx, tx, candidate.MessageID, in.AgentID)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+
+		var attempts int
+		if err := tx.QueryRowContext(ctx, `
+SELECT claim_attempts
+FROM message_receipts
+WHERE message_id = ? AND agent_id = ?`, candidate.MessageID, in.AgentID).Scan(&attempts); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+
+		out = append(out, ClaimedMessage{
+			Message:        msg,
+			ClaimToken:     token,
+			ClaimExpiresAt: leaseExpiry,
+			ClaimAttempts:  attempts,
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) AckMessageClaim(ctx context.Context, messageID, agentID, claimToken string, markRead bool) error {
+	now := nowUTC().Format(timeFormat)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	status := "delivered"
+	readAtArg := any(nil)
+	if markRead {
+		status = "read"
+		readAtArg = now
+	}
+
+	res, err := tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET status = ?,
+    delivered_at = COALESCE(delivered_at, ?),
+    read_at = COALESCE(read_at, ?),
+    claim_token = NULL,
+    claim_expires_at = NULL,
+    last_error = NULL
+WHERE message_id = ?
+  AND agent_id = ?
+  AND claim_token = ?
+  AND claim_expires_at IS NOT NULL
+  AND claim_expires_at > ?
+  AND status = 'pending'`, status, now, readAtArg, messageID, agentID, claimToken, now)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		_ = tx.Rollback()
+		return ErrClaimNotFound
+	}
+
+	if markRead {
+		_, _ = tx.ExecContext(ctx, `
+UPDATE messages
+SET status = CASE WHEN status IN ('pending','delivered') THEN 'read' ELSE status END,
+    read_at = COALESCE(read_at, ?),
+    delivered_at = COALESCE(delivered_at, ?)
+WHERE id = ?`, now, now, messageID)
+	} else {
+		_, _ = tx.ExecContext(ctx, `
+UPDATE messages
+SET status = CASE WHEN status = 'pending' THEN 'delivered' ELSE status END,
+    delivered_at = COALESCE(delivered_at, ?)
+WHERE id = ?`, now, messageID)
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) NackMessageClaim(ctx context.Context, messageID, agentID, claimToken, reason string) error {
+	now := nowUTC().Format(timeFormat)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET claim_token = NULL,
+    claim_expires_at = NULL,
+    last_error = ?
+WHERE message_id = ?
+  AND agent_id = ?
+  AND claim_token = ?
+  AND claim_expires_at IS NOT NULL
+  AND claim_expires_at > ?
+  AND status = 'pending'`, reason, messageID, agentID, claimToken, now)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		_ = tx.Rollback()
+		return ErrClaimNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RenewMessageClaim(ctx context.Context, messageID, agentID, claimToken string, leaseSeconds int) (time.Time, error) {
+	if leaseSeconds <= 0 {
+		leaseSeconds = 300
+	}
+	now := nowUTC()
+	nowTS := now.Format(timeFormat)
+	expiresAt := now.Add(time.Duration(leaseSeconds) * time.Second)
+	expiresTS := expiresAt.Format(timeFormat)
+	res, err := s.DB.ExecContext(ctx, `
+UPDATE message_receipts
+SET claim_expires_at = ?
+WHERE message_id = ?
+  AND agent_id = ?
+  AND claim_token = ?
+  AND claim_expires_at IS NOT NULL
+  AND claim_expires_at > ?
+  AND status = 'pending'`, expiresTS, messageID, agentID, claimToken, nowTS)
+	if err != nil {
+		return time.Time{}, err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return time.Time{}, ErrClaimNotFound
+	}
+	return expiresAt, nil
+}
+
+func (s *Store) getMessageForAgentTx(ctx context.Context, tx *sql.Tx, messageID, agentID string) (model.Message, error) {
+	row := tx.QueryRowContext(ctx, `
+SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.to_group_id, m.queue_mode, m.reply_to_id, m.content_type, m.content,
+       mr.status, m.priority, m.tags, m.metadata, m.created_at, m.expires_at, mr.delivered_at, mr.read_at
+FROM message_receipts mr
+JOIN messages m ON m.id = mr.message_id
+WHERE mr.message_id = ? AND mr.agent_id = ?`, messageID, agentID)
+	return scanMessage(row)
+}
+
 func (s *Store) MessageThread(ctx context.Context, messageID string) ([]model.Message, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 WITH RECURSIVE thread AS (
@@ -273,7 +608,7 @@ WITH RECURSIVE thread AS (
   SELECT m.id FROM messages m
   JOIN thread t ON m.reply_to_id = t.id
 )
-SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.reply_to_id, m.content_type, m.content,
+SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.to_group_id, m.queue_mode, m.reply_to_id, m.content_type, m.content,
        m.status, m.priority, m.tags, m.metadata, m.created_at, m.expires_at, m.delivered_at, m.read_at
 FROM messages m
 JOIN thread t ON t.id = m.id
@@ -310,6 +645,8 @@ func scanMessage(scanner interface {
 		m         model.Message
 		toAgentID sql.NullString
 		topicID   sql.NullString
+		toGroupID sql.NullString
+		queueMode int
 		replyToID sql.NullString
 		status    string
 		priority  string
@@ -325,6 +662,8 @@ func scanMessage(scanner interface {
 		&m.FromAgentID,
 		&toAgentID,
 		&topicID,
+		&toGroupID,
+		&queueMode,
 		&replyToID,
 		&m.ContentType,
 		&m.Content,
@@ -345,6 +684,10 @@ func scanMessage(scanner interface {
 	if topicID.Valid {
 		m.TopicID = &topicID.String
 	}
+	if toGroupID.Valid {
+		m.ToGroupID = &toGroupID.String
+	}
+	m.QueueMode = queueMode == 1
 	if replyToID.Valid {
 		m.ReplyToID = &replyToID.String
 	}

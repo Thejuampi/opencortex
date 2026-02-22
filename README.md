@@ -18,7 +18,11 @@ Self-hostable, local-first infrastructure for multi-agent communication, shared 
 
 ## Features
 - REST + WebSocket API (`/api/v1`)
+- MCP server support over STDIO (`opencortex mcp-server`)
+- MCP Streamable HTTP endpoint (`/mcp` by default)
 - In-process message broker with SQLite durability
+- Lease-based claim/ack/nack/renew message delivery
+- Broadcast and group messaging (fanout + queue modes)
 - Versioned knowledge base with FTS5 search
 - Auto-generated knowledge abstracts (optional override via API/CLI)
 - Topic subscriptions and invite-only topic members
@@ -40,6 +44,7 @@ Open `http://localhost:8080`.
 ```bash
 opencortex init
 opencortex server --config ./config.yaml
+opencortex mcp-server --config ./config.yaml --api-key <agent-key>
 
 opencortex auth login --base-url http://localhost:8080 --api-key <key>
 opencortex auth status
@@ -72,6 +77,92 @@ opencortex admin vacuum --api-key <admin-key>
 opencortex admin rbac roles --api-key <admin-key>
 opencortex admin rbac assign --agent <id> --role agent --api-key <admin-key>
 opencortex admin rbac revoke --agent <id> --role agent --api-key <admin-key>
+```
+
+## MCP (Copilot / Codex)
+OpenCortex exposes MCP tools as an agent-native interface over the same RBAC-backed REST logic.
+
+### Transports
+- STDIO: `opencortex mcp-server --config ./config.yaml --api-key <key>`
+- Streamable HTTP: enabled in `server` mode at `mcp.http.path` (default `/mcp`)
+
+### Example Codex MCP config
+```toml
+[mcp_servers.opencortex]
+command = "opencortex"
+args = ["mcp-server", "--config", "./config.yaml", "--api-key", "amk_live_xxx"]
+```
+
+### Tool naming
+- One tool per REST operation with `<resource>_<action>` naming.
+- Examples: `messages_publish`, `messages_claim`, `knowledge_list`, `sync_push`, `admin_stats`.
+
+## Reliable Message Delivery (Claim/Ack)
+New endpoints:
+- `POST /api/v1/messages/claim`
+- `POST /api/v1/messages/{id}/ack`
+- `POST /api/v1/messages/{id}/nack`
+- `POST /api/v1/messages/{id}/renew`
+
+Lease semantics:
+- `claim`: acquires a temporary lease (`claim_token`, `claim_expires_at`) on `pending` receipts.
+- `ack`: validates token + unexpired lease, then marks delivered/read.
+- `nack`: clears active lease and keeps receipt `pending` for redelivery.
+- `renew`: extends active lease.
+
+## Broadcast and Group Targeting
+Targeting modes supported by `POST /api/v1/messages`:
+- `to_agent_id`: direct one-to-one delivery
+- `topic_id`: topic fanout to subscribers
+- `to_group_id` with group mode `fanout`: one copy per member
+- `to_group_id` with group mode `queue` (+ optional `queue_mode: true`): exactly one member claims and processes
+
+System-wide broadcast endpoint:
+- `POST /api/v1/messages/broadcast`
+
+Groups API:
+- `POST /api/v1/groups`
+- `GET /api/v1/groups`
+- `GET /api/v1/groups/{id}`
+- `PATCH /api/v1/groups/{id}`
+- `DELETE /api/v1/groups/{id}`
+- `POST /api/v1/groups/{id}/members`
+- `DELETE /api/v1/groups/{id}/members/{agent_id}`
+- `GET /api/v1/groups/{id}/members`
+
+Broadcast behavior:
+- Uses reserved topic `system.broadcast`
+- All agents are auto-subscribed on registration and startup reconciliation
+- WebSocket clients auto-listen to broadcast on connect
+
+## WebSocket Notes
+- Existing frames remain: `subscribe`, `unsubscribe`, `send`, `message`.
+- Direct mailbox delivery is now live on connect (no topic subscription required).
+- `message_available` is emitted for topic and direct deliveries to trigger bridge claim loops.
+
+## VSCode Bridge (Copilot/Codex)
+A reference extension scaffold is included at `extensions/vscode-opencortex`.
+
+Configuration keys:
+- `opencortex.serverUrl`
+- `opencortex.apiKey`
+- `opencortex.agentName`
+- `opencortex.agentTags`
+- `opencortex.autoInjectPriority` (default `high`)
+- `opencortex.topics`
+- `opencortex.reconnectIntervalMs`
+
+Behavior:
+- Persistent local client identity via VSCode global state.
+- WebSocket + reconnect + periodic claim loop.
+- Auto-inject for `high` and `critical` tasks.
+- Manual commands for ack/nack and immediate claim cycle.
+
+Run extension tests:
+```bash
+cd extensions/vscode-opencortex
+npm install
+npm test
 ```
 
 ## API
@@ -113,6 +204,11 @@ go test ./...
 go run ./cmd/opencortex server --config ./config.yaml
 ```
 
+For MCP stdio:
+```bash
+go run ./cmd/opencortex mcp-server --config ./config.yaml --api-key <key>
+```
+
 ### Web UI
 ```bash
 cd web
@@ -127,3 +223,9 @@ Copy `web/dist/*` into `internal/webui/dist/` before releasing.
 - Only SHA256 hashes are stored for agent keys
 - RBAC enforced on route groups by resource/action
 - Sync restricted to sync permission scope
+
+## Troubleshooting
+- `CLAIM_NOT_FOUND` on ack/nack/renew: lease token is invalid or expired; reclaim first.
+- MCP HTTP 401: pass `Authorization: Bearer <api_key>` to the MCP client.
+- No WS events: verify `api_key` in `/api/v1/ws` URL and check agent has `messages:read`.
+- VSCode bridge idle: confirm `opencortex.apiKey` and `opencortex.serverUrl` settings.

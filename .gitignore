@@ -16,6 +16,7 @@ data/
 
 # Node
 web/node_modules/
+extensions/vscode-opencortex/node_modules/
 
 # Build artifacts
 web/dist/
@@ -26,4 +27,3 @@ coverage.out
 Thumbs.db
 .vscode/
 .idea/
-
