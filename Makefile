@@ -1,9 +1,12 @@
 SHELL := /bin/bash
 
-.PHONY: build test test-integration lint web-build web-sync
+.PHONY: build build-autostart test test-integration lint web-build web-sync
 
 build:
 	go build ./...
+
+build-autostart:
+	go build -tags autostart ./...
 
 test:
 	go test ./...

@@ -97,12 +97,18 @@ func runBootstrap(ctx context.Context, cfgPath string, cfg config.Config, opts b
 
 	autostartOK := state.AutostartConfigured
 	if opts.All && !opts.NoAutostart {
-		exePath, _ := os.Executable()
-		enabled, err := bootstrap.ConfigureAutostart(exePath, cfgPath)
-		if err != nil && !opts.Silent {
-			fmt.Printf("warning: autostart setup failed: %v\n", err)
+		if !bootstrap.AutostartSupported() {
+			if !opts.Silent {
+				fmt.Println("info: autostart setup is disabled in this build (compile with -tags autostart to enable)")
+			}
+		} else {
+			exePath, _ := os.Executable()
+			enabled, err := bootstrap.ConfigureAutostart(exePath, cfgPath)
+			if err != nil && !opts.Silent {
+				fmt.Printf("warning: autostart setup failed: %v\n", err)
+			}
+			autostartOK = enabled || autostartOK
 		}
-		autostartOK = enabled || autostartOK
 	}
 
 	state.Version = bootstrap.StateVersion
@@ -159,7 +165,7 @@ func maybeOpenBrowser(rawURL string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", rawURL)
+		cmd = exec.Command("explorer.exe", rawURL)
 	case "darwin":
 		cmd = exec.Command("open", rawURL)
 	default:

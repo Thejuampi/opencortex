@@ -268,6 +268,10 @@ If projection links fail, installation still succeeds and prints warnings.
 ```bash
 go test ./...
 go run ./cmd/opencortex server --config ./config.yaml
+# default build profile (recommended for distribution; no OS autostart persistence hooks)
+go build ./cmd/opencortex
+# optional profile with autostart persistence integration
+go build -tags autostart ./cmd/opencortex
 ```
 
 Bootstrap helpers:
@@ -297,6 +301,8 @@ Copy `web/dist/*` into `internal/webui/dist/` before releasing.
 - Only SHA256 hashes are stored for agent keys
 - RBAC enforced on route groups by resource/action
 - Sync restricted to sync permission scope
+- Default builds disable OS autostart persistence integration (`launchd/systemd/schtasks`) to reduce AV false-positive heuristics.
+- Re-enable autostart integration only when needed by compiling with `-tags autostart`.
 
 ## Troubleshooting
 - `CLAIM_NOT_FOUND` on ack/nack/renew: lease token is invalid or expired; reclaim first.
