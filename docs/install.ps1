@@ -26,9 +26,11 @@ try {
   Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath
   Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumsPath
 
-  $expected = (Select-String -Path $checksumsPath -Pattern (" " + [regex]::Escape($asset) + "$")).ToString().Split(" ")[0].Trim()
+  $checksumLine = Select-String -Path $checksumsPath -Pattern ("^[a-fA-F0-9]{64}\s+" + [regex]::Escape($asset) + "$") | Select-Object -First 1
+  if (-not $checksumLine) { throw "Could not find checksum entry for $asset" }
+  $expected = ($checksumLine.Line -split "\s+")[0].Trim().ToLower()
   $actual = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
-  if ($expected.ToLower() -ne $actual) { throw "Checksum mismatch" }
+  if ($expected -ne $actual) { throw "Checksum mismatch" }
 
   Expand-Archive -Path $zipPath -DestinationPath $tmp -Force
   $binDir = Join-Path $env:USERPROFILE ".opencortex\bin"
