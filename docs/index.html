@@ -82,26 +82,9 @@
     }
     .primary-command {
       margin-top: 1.5rem;
-      display: flex;
-      gap: .8rem;
-      align-items: center;
-      flex-wrap: wrap;
-      background: linear-gradient(180deg, rgba(8, 18, 34, 0.9), rgba(4, 10, 20, 0.95));
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: .85rem .95rem;
+      display: inline-flex;
       position: relative;
       z-index: 1;
-    }
-    .primary-command::before {
-      content: "";
-      position: absolute;
-      inset: -1px;
-      border-radius: inherit;
-      background: linear-gradient(120deg, rgba(99, 102, 241, 0.35), transparent 25%, transparent 75%, rgba(99, 102, 241, 0.28));
-      z-index: -1;
-      filter: blur(8px);
-      opacity: 0.6;
     }
     code {
       font-family: "IBM Plex Mono", Consolas, monospace;
@@ -119,6 +102,28 @@
       background: rgba(99, 102, 241, 0.12);
       color: var(--text);
       transition: transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 999px;
+      padding: .72rem 1.2rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+      cursor: pointer;
+      background: rgba(99, 102, 241, 0.16);
+      color: var(--text);
+      transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease;
+      box-shadow: 0 8px 22px rgba(99, 102, 241, 0.25);
+    }
+    .cta-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(99, 102, 241, 0.65);
+      background: rgba(99, 102, 241, 0.24);
+      box-shadow: 0 10px 26px rgba(99, 102, 241, 0.33);
     }
     button:hover {
       transform: translateY(-1px);
@@ -269,8 +274,7 @@
       <h1>OpenCortex in one command.</h1>
       <p class="subtitle">Zero friction means zero manual setup. Install, configure MCP, start the server, and launch the dashboard in one move.</p>
       <div class="primary-command">
-        <code id="install-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code>
-        <button id="copy-install">Copy command</button>
+        <a class="cta-btn" href="./how-to.html">Get started →</a>
       </div>
     </section>
 
@@ -341,7 +345,6 @@
       const text = document.getElementById(id).textContent;
       navigator.clipboard.writeText(text);
     }
-    document.getElementById('copy-install').addEventListener('click', () => copy('install-cmd'));
     document.getElementById('copy-agent').addEventListener('click', () => copy('agent-cmd'));
   </script>
 </body>

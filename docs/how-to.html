@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How to Install — OpenCortex</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+
+  <style>
+    :root {
+      --bg:         #0d1117;
+      --bg-card:    #161b22;
+      --bg-code:    #0d1117;
+      --border:     rgba(255,255,255,0.08);
+      --border-hi:  rgba(99,102,241,0.4);
+      --accent:     #6366f1;
+      --accent-dim: rgba(99,102,241,0.15);
+      --text:       #e6edf3;
+      --text-muted: #7d8590;
+      --text-dim:   #484f58;
+      --green:      #3fb950;
+      --yellow:     #d29922;
+      --red:        #f85149;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+
+    /* ── NAV ── */
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 40px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: rgba(13,17,23,0.92);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    nav a.back {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      transition: color 0.2s;
+    }
+    nav a.back:hover { color: var(--text); }
+    nav a.back svg { width: 14px; height: 14px; }
+    nav .divider { color: var(--text-dim); font-size: 13px; }
+    nav .current { color: var(--text-muted); font-size: 13px; }
+
+    /* ── LAYOUT ── */
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 60px 40px 100px;
+    }
+
+    /* ── HEADER ── */
+    .page-header {
+      margin-bottom: 56px;
+    }
+    .page-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 800;
+      line-height: 1.1;
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+    .page-desc {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 560px;
+      line-height: 1.65;
+    }
+
+    /* ── PLATFORM TABS ── */
+    .platform-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .tab {
+      padding: 9px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+      user-select: none;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .platform-content { display: none; }
+    .platform-content.active { display: block; }
+
+    /* ── SECTION ── */
+    .section {
+      margin-bottom: 48px;
+    }
+    .section-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    /* ── STEP CARDS ── */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 16px;
+      align-items: start;
+      transition: border-color 0.2s;
+    }
+    .step:hover { border-color: var(--border-hi); }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent-dim);
+      border: 1px solid var(--border-hi);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-body {}
+    .step-title {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .step-desc {
+      color: var(--text-muted);
+      font-size: 13.5px;
+      margin-bottom: 12px;
+    }
+    .step-desc:last-child { margin-bottom: 0; }
+
+    /* ── CODE BLOCKS ── */
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .code-block code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #a5d6ff;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .copy-btn {
+      flex-shrink: 0;
+      background: rgba(99,102,241,0.1);
+      border: 1px solid var(--border-hi);
+      color: var(--accent);
+      font-size: 11px;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: rgba(99,102,241,0.2); color: #fff; }
+    .copy-btn.copied { background: rgba(63,185,80,0.15); border-color: rgba(63,185,80,0.4); color: var(--green); }
+
+    /* ── CALLOUT ── */
+    .callout {
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13.5px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin: 16px 0;
+    }
+    .callout.info { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); color: #b0b8ff; }
+    .callout.warn { background: rgba(210,153,34,0.08); border: 1px solid rgba(210,153,34,0.25); color: #e3b341; }
+    .callout.ok   { background: rgba(63,185,80,0.08);  border: 1px solid rgba(63,185,80,0.25);  color: #7ee787; }
+    .callout-icon { font-size: 15px; flex-shrink: 0; line-height: 1.5; }
+
+    /* ── DIAGRAM SECTION ── */
+    .diagram-wrapper {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 24px;
+      margin-bottom: 48px;
+    }
+    .diagram-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .diagram-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+    .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* ── WHAT HAPPENS ── */
+    .event-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .event {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .event:last-child { border-bottom: none; }
+    .event-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: 8px;
+      justify-self: center;
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .event-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .event-dot.muted { background: var(--text-dim); box-shadow: none; }
+    .event-text { font-size: 13.5px; color: var(--text-muted); }
+    .event-text strong { color: var(--text); font-weight: 500; }
+
+    /* ── AGENT NOTE ── */
+    .agent-note {
+      background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(99,102,241,0.02));
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-top: 48px;
+    }
+    .agent-note-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .agent-note-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .agent-note p {
+      color: var(--text-muted);
+      font-size: 13.5px;
+      margin-bottom: 12px;
+    }
+    .agent-note p:last-child { margin-bottom: 0; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="back">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M10 12L6 8l4-4"/>
+    </svg>
+    Back
+  </a>
+  <span class="divider">/</span>
+  <span class="current">How to Install</span>
+</nav>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div class="page-label">Installation guide</div>
+    <h1>Get OpenCortex running.</h1>
+    <p class="page-desc">
+      Pick your platform below. The automatic path does everything in one shot —
+      binary, server, MCP config, VSCode extension. The manual path is for
+      locked-down environments.
+    </p>
+  </div>
+
+  <!-- Platform tabs -->
+  <div class="platform-tabs">
+    <div class="tab active" onclick="switchTab('mac')">macOS</div>
+    <div class="tab" onclick="switchTab('linux')">Linux</div>
+    <div class="tab" onclick="switchTab('windows')">Windows</div>
+    <div class="tab" onclick="switchTab('manual')">Manual</div>
+  </div>
+
+  <!-- macOS -->
+  <div class="platform-content active" id="tab-mac">
+    <div class="section">
+      <div class="section-label">Automatic — recommended</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Run the install script</div>
+            <div class="step-desc">Open Terminal and run this single command. It installs the binary, starts the server, configures MCP for Copilot and Codex, and installs the VSCode extension if VSCode is present.</div>
+            <div class="code-block">
+              <code>curl -fsSL https://thejuampi.github.io/opencortex/install.sh | sh</code>
+              <button class="copy-btn" onclick="copy(this, 'curl -fsSL https://thejuampi.github.io/opencortex/install.sh | sh')">Copy</button>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Wait ~10 seconds</div>
+            <div class="step-desc">The script auto-detects your shell, installs to <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">/usr/local/bin</code>, and prints a confirmation when ready. No prompts, no restarts required.</div>
+            <div class="callout ok">
+              <span class="callout-icon">✓</span>
+              <span>When done, you'll see: <strong>OpenCortex is ready. Dashboard → http://localhost:8080</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Open any Copilot or Codex session</div>
+            <div class="step-desc">Your agents will appear on the dashboard automatically. No further configuration needed.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Linux -->
+  <div class="platform-content" id="tab-linux">
+    <div class="section">
+      <div class="section-label">Automatic — recommended</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Run the install script</div>
+            <div class="step-desc">Paste this in your terminal. Tested on Ubuntu 20+, Debian 11+, Fedora 38+, and Arch.</div>
+            <div class="code-block">
+              <code>curl -fsSL https://thejuampi.github.io/opencortex/install.sh | sh</code>
+              <button class="copy-btn" onclick="copy(this, 'curl -fsSL https://thejuampi.github.io/opencortex/install.sh | sh')">Copy</button>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Auto-start (optional)</div>
+            <div class="step-desc">To have the server start automatically on login:</div>
+            <div class="code-block">
+              <code>opencortex server --enable-autostart</code>
+              <button class="copy-btn" onclick="copy(this, 'opencortex server --enable-autostart')">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Windows -->
+  <div class="platform-content" id="tab-windows">
+    <div class="section">
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <span>The bash install script does not work on Windows. Use the PowerShell command below, or follow the manual steps.</span>
+      </div>
+      <div class="section-label" style="margin-top:24px">PowerShell — recommended</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Open PowerShell as Administrator</div>
+            <div class="step-desc">Press <kbd style="background:var(--bg-code);border:1px solid var(--border);padding:1px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px">Win+X</kbd> → Windows PowerShell (Admin)</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Run the installer</div>
+            <div class="code-block">
+              <code>irm https://thejuampi.github.io/opencortex/install.ps1 | iex</code>
+              <button class="copy-btn" onclick="copy(this, 'irm https://thejuampi.github.io/opencortex/install.ps1 | iex')">Copy</button>
+            </div>
+            <div class="callout info" style="margin-top:12px">
+              <span class="callout-icon">ℹ</span>
+              <span>If execution policy blocks this, first run: <code style="font-family:'JetBrains Mono',monospace;font-size:12px">Set-ExecutionPolicy RemoteSigned -Scope CurrentUser</code></span>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Restart your terminal</div>
+            <div class="step-desc">Close and reopen PowerShell or any terminal so the PATH update takes effect.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual -->
+  <div class="platform-content" id="tab-manual">
+    <div class="section">
+      <div class="callout info">
+        <span class="callout-icon">ℹ</span>
+        <span>Use this path only if automatic installation fails due to permission restrictions or network policies.</span>
+      </div>
+      <div class="section-label" style="margin-top:24px">Manual steps</div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Download the binary for your platform</div>
+            <div class="code-block">
+              <code># macOS (Apple Silicon)
+curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-arm64 -o opencortex
+
+# macOS (Intel)
+curl -L https://thejuampi.github.io/opencortex/releases/opencortex-darwin-amd64 -o opencortex
+
+# Linux (amd64)
+curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex
+
+# Windows
+# Download opencortex-windows-amd64.exe from the releases page</code>
+              <button class="copy-btn" onclick="copy(this, 'curl -L https://thejuampi.github.io/opencortex/releases/opencortex-linux-amd64 -o opencortex')">Copy</button>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Make it executable and move to PATH</div>
+            <div class="code-block">
+              <code>chmod +x opencortex && sudo mv opencortex /usr/local/bin/</code>
+              <button class="copy-btn" onclick="copy(this, 'chmod +x opencortex && sudo mv opencortex /usr/local/bin/')">Copy</button>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Initialize and configure</div>
+            <div class="code-block">
+              <code>opencortex init --all</code>
+              <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+            </div>
+            <div class="step-desc" style="margin-top:10px">This writes MCP configs for Copilot and Codex, installs the VSCode extension if detected, and creates the local database.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Start the server</div>
+            <div class="code-block">
+              <code>opencortex server</code>
+              <button class="copy-btn" onclick="copy(this, 'opencortex server')">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- What happens diagram -->
+  <div class="diagram-wrapper">
+    <div class="diagram-title">What the installer does</div>
+    <div class="diagram-subtitle">Activity diagram — automatic path</div>
+    <div class="mermaid">
+flowchart TD
+    A([Start installer]) --> B[Download binary for platform]
+    B --> C[Install to /usr/local/bin]
+    C --> D{First run?}
+    D -- Yes --> E[Generate admin key\nCreate ~/.opencortex/]
+    D -- No --> F[Skip init]
+    E --> G[Start server on :8080]
+    F --> G
+    G --> H{Port 8080 free?}
+    H -- No --> I[Try :8081, :8082 ...\nUpdate all configs]
+    H -- Yes --> J[Detect environment]
+    I --> J
+    J --> K{VSCode installed?}
+    K -- Yes --> L[Install extension\nUpdate settings.json]
+    K -- No --> M[Skip]
+    L --> N{Copilot config found?}
+    M --> N
+    N -- Yes --> O[Merge MCP entry]
+    N -- No --> P[Create config]
+    O --> Q{Codex config found?}
+    P --> Q
+    Q -- Yes --> R[Merge MCP entry]
+    Q -- No --> S[Create config]
+    R --> T[Open dashboard in browser]
+    S --> T
+    T --> U([Done ✓])
+
+    style A fill:#6366f1,color:#fff,stroke:none
+    style U fill:#3fb950,color:#fff,stroke:none
+    style I fill:#d29922,color:#fff,stroke:none
+    </div>
+  </div>
+
+  <!-- Decision diagram -->
+  <div class="diagram-wrapper">
+    <div class="diagram-title">Which path to use</div>
+    <div class="diagram-subtitle">Decision flow for agents and users</div>
+    <div class="mermaid">
+flowchart TD
+    A([Need to install OpenCortex]) --> B{What OS?}
+    B -- macOS / Linux --> C{Have curl?}
+    B -- Windows --> D{Have PowerShell?}
+    B -- Other --> E[Manual path]
+
+    C -- Yes --> F[curl installer\none command]
+    C -- No --> E
+
+    D -- Yes --> G[PowerShell installer\none command]
+    D -- No --> E
+
+    F --> H{Success?}
+    G --> H
+    E --> I[Download binary\nmanually]
+
+    H -- Yes --> J([Agents ready ✓])
+    H -- No: permission error --> K[opencortex init --all\nas admin]
+    H -- No: network blocked --> I
+
+    I --> L[opencortex init --all]
+    K --> J
+    L --> J
+
+    style A fill:#6366f1,color:#fff,stroke:none
+    style J fill:#3fb950,color:#fff,stroke:none
+    style K fill:#d29922,color:#fff,stroke:none
+    </div>
+  </div>
+
+  <!-- What actually happens at first run -->
+  <div class="section">
+    <div class="section-label">What happens after install</div>
+    <div class="event-list">
+      <div class="event">
+        <div class="event-dot"></div>
+        <div class="event-text"><strong>Server starts on localhost:8080.</strong> Binds to loopback only by default. Remote access requires explicit config.</div>
+      </div>
+      <div class="event">
+        <div class="event-dot"></div>
+        <div class="event-text"><strong>Admin key generated</strong> and stored in <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">~/.opencortex/config.yaml</code>. Shown in terminal once, never again.</div>
+      </div>
+      <div class="event">
+        <div class="event-dot"></div>
+        <div class="event-text"><strong>MCP config written</strong> for Copilot and Codex. Points to the local server. Agents auto-discover from this point forward.</div>
+      </div>
+      <div class="event">
+        <div class="event-dot green"></div>
+        <div class="event-text"><strong>VSCode extension activates</strong> (if VSCode is installed). Holds a persistent WebSocket to the server for real-time message delivery.</div>
+      </div>
+      <div class="event">
+        <div class="event-dot green"></div>
+        <div class="event-text"><strong>Dashboard opens</strong> in browser at http://localhost:8080. Shows live agent connections as they come in.</div>
+      </div>
+      <div class="event">
+        <div class="event-dot muted"></div>
+        <div class="event-text"><strong>Auto-start configured</strong> (launchd / systemd / Task Scheduler). Server comes back up automatically on login. Disable with <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex server --no-autostart</code>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent note -->
+  <div class="agent-note">
+    <div class="agent-note-label">For agents</div>
+    <div class="agent-note-title">If you need to install OpenCortex on behalf of a user</div>
+    <p>
+      Detect the OS first. On macOS and Linux, run the curl command. On Windows, run the PowerShell
+      command. If either fails with a permission error, fall through to the manual path:
+      download the binary, run <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex init --all</code>, then
+      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex server</code>.
+    </p>
+    <p>
+      After any install path, verify with <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex status</code>. If it returns a running
+      server and port, installation succeeded. If not, check
+      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor</code> for diagnostics.
+    </p>
+    <div class="code-block" style="margin-top:4px">
+      <code># Verify installation succeeded
+opencortex status</code>
+      <button class="copy-btn" onclick="copy(this, 'opencortex status')">Copy</button>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+  // Tab switching
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.platform-content').forEach(c => c.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  // Copy buttons
+  function copy(btn, text) {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+
+  // Mermaid init
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background: '#161b22',
+      primaryColor: '#21262d',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: 'rgba(255,255,255,0.12)',
+      lineColor: 'rgba(255,255,255,0.25)',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+      edgeLabelBackground: '#161b22',
+      nodeTextColor: '#e6edf3',
+    },
+    flowchart: {
+      curve: 'basis',
+      padding: 20,
+    }
+  });
+</script>
+</body>
+</html>
