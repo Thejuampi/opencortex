@@ -44,7 +44,7 @@
       filter: blur(24px);
       opacity: 0.9;
     }
-    .hero, .suite {
+    .hero {
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--panel);
@@ -130,77 +130,6 @@
       border-color: rgba(99, 102, 241, 0.58);
       background: rgba(99, 102, 241, 0.2);
     }
-    .suite {
-      margin-top: 1.2rem;
-      padding: .8rem;
-    }
-    .suite-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: .7rem;
-    }
-    .cell {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: var(--panel-strong);
-      padding: 1rem;
-      min-height: 174px;
-      display: flex;
-      flex-direction: column;
-      gap: .65rem;
-    }
-    .cell h3 {
-      margin: 0;
-      font-size: 1rem;
-      letter-spacing: 0.01em;
-    }
-    .cell p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.52;
-      font-size: .96rem;
-    }
-    .mini-command {
-      margin-top: auto;
-      border: 1px solid rgba(114, 145, 198, 0.22);
-      border-radius: 10px;
-      background: rgba(6, 12, 24, 0.72);
-      padding: .58rem .62rem;
-    }
-    .tabs {
-      display: inline-flex;
-      gap: .35rem;
-      margin-top: .1rem;
-    }
-    .tab {
-      font-size: .86rem;
-      border-color: rgba(114, 145, 198, 0.32);
-      padding: .38rem .66rem;
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .tab.active {
-      border-color: rgba(99, 102, 241, 0.58);
-      background: rgba(99, 102, 241, 0.18);
-      color: #dbfffb;
-    }
-    .cell.fallback {
-      border: 0;
-      background: rgba(8, 14, 27, 0.35);
-      box-shadow: inset 0 0 0 1px rgba(114, 145, 198, 0.08);
-      padding: .76rem;
-    }
-    .cell.fallback h3 {
-      font-size: .88rem;
-      opacity: .78;
-    }
-    .cell.fallback p {
-      color: #6e86aa;
-      font-size: .85rem;
-    }
-    .cell.fallback .muted-link {
-      font-size: .84rem;
-      color: #8ca6cc;
-    }
     .features {
       margin-top: 1.1rem;
       border: 1px solid var(--line);
@@ -231,16 +160,6 @@
       font-size: .88rem;
       line-height: 1.42;
       color: var(--muted);
-    }
-    .muted-link {
-      color: #b9d9ff;
-      text-decoration: none;
-      font-weight: 600;
-      margin-top: auto;
-    }
-    .muted-link:hover {
-      color: #def0ff;
-      text-decoration: underline;
     }
     .grid-label {
       margin: 0 0 .75rem;
@@ -278,34 +197,6 @@
       </div>
     </section>
 
-    <section class="suite">
-      <p class="grid-label">Get running fast</p>
-      <div class="suite-grid">
-      <section class="cell">
-        <h3>Tell your agent to run this</h3>
-        <p>Drop this straight into an agent session to bootstrap OpenCortex automatically.</p>
-        <div class="mini-command">
-          <code id="agent-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code>
-        </div>
-        <button id="copy-agent">Copy agent command</button>
-      </section>
-      <section class="cell">
-        <h3>Platform commands</h3>
-        <p>Use the exact installer command for your current shell environment.</p>
-        <div class="tabs">
-          <button class="tab active" data-target="unix">macOS/Linux</button>
-          <button class="tab" data-target="win">Windows</button>
-        </div>
-        <div class="mini-command"><code id="platform-cmd">curl -fsSL https://thejuampi.github.io/opencortex/install | sh</code></div>
-      </section>
-      <section class="cell fallback">
-        <h3>Need manual setup?</h3>
-        <p>For locked-down environments, use the manual fallback flow and recover quickly.</p>
-        <a class="muted-link" href="./manual-setup.html">Open manual setup</a>
-      </section>
-      </div>
-    </section>
-
     <section class="features">
       <p class="grid-label">Core pillars</p>
       <div class="feature-grid">
@@ -330,22 +221,7 @@
   </div>
 
   <script>
-    const unix = 'curl -fsSL https://thejuampi.github.io/opencortex/install | sh';
-    const win = 'irm https://thejuampi.github.io/opencortex/install.ps1 | iex';
-    const platformCmd = document.getElementById('platform-cmd');
-    const tabs = document.querySelectorAll('.tab');
-    tabs.forEach((tab) => {
-      tab.addEventListener('click', () => {
-        tabs.forEach((t) => t.classList.remove('active'));
-        tab.classList.add('active');
-        platformCmd.textContent = tab.dataset.target === 'win' ? win : unix;
-      });
-    });
-    function copy(id) {
-      const text = document.getElementById(id).textContent;
-      navigator.clipboard.writeText(text);
-    }
-    document.getElementById('copy-agent').addEventListener('click', () => copy('agent-cmd'));
+    // landing page interactions intentionally minimal
   </script>
 </body>
 </html>
