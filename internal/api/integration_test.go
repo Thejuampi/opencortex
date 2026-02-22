@@ -101,6 +101,226 @@ func TestInitAndAgentLifecycle(t *testing.T) {
 	}
 }
 
+func TestSkillsSpecialKnowledgeLifecycle(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Default()
+	cfg.Database.Path = filepath.Join(tmp, "skills.db")
+	cfg.Auth.Enabled = true
+
+	ctx := context.Background()
+	db, err := storage.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	store := repos.New(db)
+	mem := broker.NewMemory(64)
+	app := service.New(cfg, store, mem)
+	_, adminKey, err := app.BootstrapInit(ctx, "admin")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	syncEngine := syncer.NewEngine(db, store)
+	handler := handlers.New(app, db, cfg, syncEngine)
+	hub := ws.NewHub(app, store)
+	router := api.NewRouter(handler, app, hub)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	createResp := doJSON(t, http.MethodPost, ts.URL+"/api/v1/skills", adminKey, map[string]any{
+		"title":   "OpenAPI Skill",
+		"content": "# Skill\n\ncontent",
+		"slug":    "openapi-skill",
+		"install": map[string]any{
+			"repo":   "openai/skills",
+			"path":   "skills/.curated/openapi",
+			"ref":    "main",
+			"method": "auto",
+		},
+		"tags": []string{"api"},
+	})
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create skill status: %d", createResp.StatusCode)
+	}
+	var createEnv struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Skill struct {
+				ID      string `json:"id"`
+				Slug    string `json:"slug"`
+				Install struct {
+					Repo string `json:"repo"`
+					Ref  string `json:"ref"`
+				} `json:"install"`
+			} `json:"skill"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&createEnv); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if !createEnv.OK || createEnv.Data.Skill.ID == "" {
+		t.Fatalf("unexpected create payload: %+v", createEnv)
+	}
+	if createEnv.Data.Skill.Slug != "openapi-skill" {
+		t.Fatalf("unexpected slug: %s", createEnv.Data.Skill.Slug)
+	}
+	if createEnv.Data.Skill.Install.Repo != "openai/skills" {
+		t.Fatalf("unexpected install repo: %s", createEnv.Data.Skill.Install.Repo)
+	}
+	skillID := createEnv.Data.Skill.ID
+
+	dupResp := doJSON(t, http.MethodPost, ts.URL+"/api/v1/skills", adminKey, map[string]any{
+		"title":   "OpenAPI Skill 2",
+		"content": "duplicate",
+		"slug":    "openapi-skill",
+		"install": map[string]any{
+			"repo": "openai/skills",
+			"path": "skills/.curated/openapi2",
+		},
+	})
+	defer dupResp.Body.Close()
+	if dupResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected slug conflict, got %d", dupResp.StatusCode)
+	}
+
+	knowledgeResp := doJSON(t, http.MethodPost, ts.URL+"/api/v1/knowledge", adminKey, map[string]any{
+		"title":   "plain knowledge",
+		"content": "not a skill",
+	})
+	defer knowledgeResp.Body.Close()
+	if knowledgeResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create plain knowledge status: %d", knowledgeResp.StatusCode)
+	}
+	var knowledgeEnv struct {
+		Data struct {
+			Knowledge struct {
+				ID string `json:"id"`
+			} `json:"knowledge"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(knowledgeResp.Body).Decode(&knowledgeEnv); err != nil {
+		t.Fatalf("decode plain knowledge: %v", err)
+	}
+	plainKnowledgeID := knowledgeEnv.Data.Knowledge.ID
+
+	listResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills?limit=50", adminKey, nil)
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list skills status: %d", listResp.StatusCode)
+	}
+	var listEnv struct {
+		Data struct {
+			Skills []struct {
+				ID string `json:"id"`
+			} `json:"skills"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listEnv); err != nil {
+		t.Fatalf("decode list skills: %v", err)
+	}
+	if len(listEnv.Data.Skills) != 1 || listEnv.Data.Skills[0].ID != skillID {
+		t.Fatalf("expected exactly one skill in list, got %+v", listEnv.Data.Skills)
+	}
+
+	plainGet := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills/"+plainKnowledgeID, adminKey, nil)
+	defer plainGet.Body.Close()
+	if plainGet.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for non-skill knowledge entry, got %d", plainGet.StatusCode)
+	}
+
+	patchResp := doJSON(t, http.MethodPatch, ts.URL+"/api/v1/skills/"+skillID, adminKey, map[string]any{
+		"install": map[string]any{
+			"ref": "dev",
+		},
+		"tags": []string{"api", "review"},
+	})
+	defer patchResp.Body.Close()
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("patch skill status: %d", patchResp.StatusCode)
+	}
+	var patchEnv struct {
+		Data struct {
+			Skill struct {
+				Install struct {
+					Ref string `json:"ref"`
+				} `json:"install"`
+			} `json:"skill"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(patchResp.Body).Decode(&patchEnv); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	if patchEnv.Data.Skill.Install.Ref != "dev" {
+		t.Fatalf("expected install.ref=dev, got %s", patchEnv.Data.Skill.Install.Ref)
+	}
+
+	historyResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills/"+skillID+"/history", adminKey, nil)
+	defer historyResp.Body.Close()
+	if historyResp.StatusCode != http.StatusOK {
+		t.Fatalf("history status: %d", historyResp.StatusCode)
+	}
+	var historyEnv struct {
+		Data struct {
+			History []map[string]any `json:"history"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(historyResp.Body).Decode(&historyEnv); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(historyEnv.Data.History) == 0 {
+		t.Fatalf("expected non-empty history")
+	}
+
+	versionResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills/"+skillID+"/versions/1", adminKey, nil)
+	defer versionResp.Body.Close()
+	if versionResp.StatusCode != http.StatusOK {
+		t.Fatalf("version status: %d", versionResp.StatusCode)
+	}
+
+	pinResp := doJSON(t, http.MethodPost, ts.URL+"/api/v1/skills/"+skillID+"/pin", adminKey, map[string]any{})
+	defer pinResp.Body.Close()
+	if pinResp.StatusCode != http.StatusOK {
+		t.Fatalf("pin status: %d", pinResp.StatusCode)
+	}
+	var pinEnv struct {
+		Data struct {
+			Skill struct {
+				IsPinned bool `json:"is_pinned"`
+			} `json:"skill"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(pinResp.Body).Decode(&pinEnv); err != nil {
+		t.Fatalf("decode pin: %v", err)
+	}
+	if !pinEnv.Data.Skill.IsPinned {
+		t.Fatalf("expected skill to be pinned")
+	}
+
+	unpinResp := doJSON(t, http.MethodDelete, ts.URL+"/api/v1/skills/"+skillID+"/pin", adminKey, nil)
+	defer unpinResp.Body.Close()
+	if unpinResp.StatusCode != http.StatusOK {
+		t.Fatalf("unpin status: %d", unpinResp.StatusCode)
+	}
+	var unpinEnv struct {
+		Data struct {
+			Skill struct {
+				IsPinned bool `json:"is_pinned"`
+			} `json:"skill"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(unpinResp.Body).Decode(&unpinEnv); err != nil {
+		t.Fatalf("decode unpin: %v", err)
+	}
+	if unpinEnv.Data.Skill.IsPinned {
+		t.Fatalf("expected skill to be unpinned")
+	}
+}
+
 func TestMessageClaimAckAndRedelivery(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.Default()

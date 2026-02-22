@@ -163,6 +163,18 @@ func (b *Bridge) toolSpecs() []ToolSpec {
 		{Name: "knowledge_pin", Description: "Pin knowledge entry", Method: http.MethodPost, Path: "/api/v1/knowledge/{id}/pin", Resource: "knowledge", Action: "write", HasPayload: true},
 		{Name: "knowledge_unpin", Description: "Unpin knowledge entry", Method: http.MethodDelete, Path: "/api/v1/knowledge/{id}/pin", Resource: "knowledge", Action: "write"},
 
+		// Skills (special knowledge)
+		{Name: "skills_create", Description: "Create skill entry", Method: http.MethodPost, Path: "/api/v1/skills", Resource: "knowledge", Action: "write", HasPayload: true},
+		{Name: "skills_list", Description: "Search/list skills", Method: http.MethodGet, Path: "/api/v1/skills", Resource: "knowledge", Action: "read", HasQuery: true},
+		{Name: "skills_get", Description: "Get skill entry", Method: http.MethodGet, Path: "/api/v1/skills/{id}", Resource: "knowledge", Action: "read"},
+		{Name: "skills_replace", Description: "Replace skill content", Method: http.MethodPut, Path: "/api/v1/skills/{id}", Resource: "knowledge", Action: "write", HasPayload: true},
+		{Name: "skills_patch", Description: "Patch skill metadata", Method: http.MethodPatch, Path: "/api/v1/skills/{id}", Resource: "knowledge", Action: "write", HasPayload: true},
+		{Name: "skills_delete", Description: "Delete skill entry", Method: http.MethodDelete, Path: "/api/v1/skills/{id}", Resource: "knowledge", Action: "manage"},
+		{Name: "skills_history", Description: "Get skill history", Method: http.MethodGet, Path: "/api/v1/skills/{id}/history", Resource: "knowledge", Action: "read"},
+		{Name: "skills_version", Description: "Get specific skill version", Method: http.MethodGet, Path: "/api/v1/skills/{id}/versions/{v}", Resource: "knowledge", Action: "read"},
+		{Name: "skills_pin", Description: "Pin skill entry", Method: http.MethodPost, Path: "/api/v1/skills/{id}/pin", Resource: "knowledge", Action: "write", HasPayload: true},
+		{Name: "skills_unpin", Description: "Unpin skill entry", Method: http.MethodDelete, Path: "/api/v1/skills/{id}/pin", Resource: "knowledge", Action: "write"},
+
 		// Collections
 		{Name: "collections_create", Description: "Create collection", Method: http.MethodPost, Path: "/api/v1/collections", Resource: "collections", Action: "write", HasPayload: true},
 		{Name: "collections_list", Description: "List collections", Method: http.MethodGet, Path: "/api/v1/collections", Resource: "collections", Action: "read", HasQuery: true},

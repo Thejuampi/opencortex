@@ -126,6 +126,7 @@ func main() {
   opencortex inbox --wait
   opencortex broadcast "deploying v2.1"
   opencortex knowledge search "auth patterns"
+  opencortex skills --help
   opencortex agents`),
 	}
 	root.SetHelpFunc(renderHelp)
@@ -149,6 +150,7 @@ func main() {
 	root.AddCommand(newWatchCommand(&baseURL, &apiKey))
 	root.AddCommand(newBroadcastCommand(&baseURL, &apiKey))
 	root.AddCommand(newKnowledgeCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newSkillsCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newSyncCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newAdminCommand(&baseURL, &apiKey, &asJSON))
 
@@ -2153,6 +2155,7 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(b, "  %sLifecycle%s: initialize local state, run API+WS+UI/MCP server\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sAgents%s: register, inspect, rotate keys\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sKnowledge%s: add, search, version, export/import entries\n", ansiGreen, ansiReset)
+		fmt.Fprintf(b, "  %sSkills%s: manage shared skillsets and install local projections\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sSync%s: configure remotes, diff, push/pull, resolve conflicts\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sAdmin%s: stats, backups, vacuum, RBAC role assignment\n\n", ansiGreen, ansiReset)
 	}
@@ -2194,6 +2197,10 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(b, "  %sPush first knowledge item%s\n", ansiGray, ansiReset)
 		fmt.Fprintf(b, "    opencortex knowledge add --title \"System Scope\" --file ./scope.md --tags scope,mvp --api-key <key>\n")
 		fmt.Fprintf(b, "    opencortex knowledge search \"scope\" --api-key <key>\n\n")
+
+		fmt.Fprintf(b, "  %sDiscover skills help%s\n", ansiGray, ansiReset)
+		fmt.Fprintf(b, "    opencortex skills --help\n")
+		fmt.Fprintf(b, "    opencortex skills install --help\n\n")
 
 		fmt.Fprintf(b, "  %sSync with remote hub%s\n", ansiGray, ansiReset)
 		fmt.Fprintf(b, "    opencortex sync remote add origin https://hub.example.com --key amk_remote_xxx --api-key <sync-key>\n")

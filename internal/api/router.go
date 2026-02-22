@@ -94,6 +94,18 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Post("/knowledge/{id}/pin", server.PinKnowledge)
 			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Delete("/knowledge/{id}/pin", server.UnpinKnowledge)
 
+			// Skills (special knowledge)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Post("/skills", server.CreateSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "read")).Get("/skills", server.ListSkills)
+			protected.With(apimw.RequirePermission(app, "knowledge", "read")).Get("/skills/{id}", server.GetSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Put("/skills/{id}", server.ReplaceSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Patch("/skills/{id}", server.PatchSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "manage")).Delete("/skills/{id}", server.DeleteSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "read")).Get("/skills/{id}/history", server.SkillHistory)
+			protected.With(apimw.RequirePermission(app, "knowledge", "read")).Get("/skills/{id}/versions/{v}", server.SkillVersion)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Post("/skills/{id}/pin", server.PinSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Delete("/skills/{id}/pin", server.UnpinSkill)
+
 			// Collections
 			protected.With(apimw.RequirePermission(app, "collections", "write")).Post("/collections", server.CreateCollection)
 			protected.With(apimw.RequirePermission(app, "collections", "read")).Get("/collections", server.ListCollections)

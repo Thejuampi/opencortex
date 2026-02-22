@@ -51,8 +51,8 @@ func TestMCPInProcessToolRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if !hasTool(tools.Tools, "messages_broadcast") || !hasTool(tools.Tools, "groups_list") {
-		t.Fatalf("expected broadcast and groups tools to be exposed")
+	if !hasTool(tools.Tools, "messages_broadcast") || !hasTool(tools.Tools, "groups_list") || !hasTool(tools.Tools, "skills_list") {
+		t.Fatalf("expected broadcast, groups, and skills tools to be exposed")
 	}
 
 	result, err := client.CallTool(ctx, mcptypes.CallToolRequest{

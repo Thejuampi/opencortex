@@ -140,6 +140,7 @@ type Client struct {
 	Messages    *MessagesService
 	Topics      *TopicsService
 	Knowledge   *KnowledgeService
+	Skills      *SkillsService
 	Collections *CollectionsService
 	Sync        *SyncService
 	Admin       *AdminService
@@ -161,6 +162,7 @@ func New(cfg Config) *Client {
 	c.Messages = &MessagesService{client: c}
 	c.Topics = &TopicsService{client: c}
 	c.Knowledge = &KnowledgeService{client: c}
+	c.Skills = &SkillsService{client: c}
 	c.Collections = &CollectionsService{client: c}
 	c.Sync = &SyncService{client: c}
 	c.Admin = &AdminService{client: c}

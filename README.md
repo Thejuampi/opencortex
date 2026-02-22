@@ -57,6 +57,13 @@ opencortex broadcast "Hello from Zero-Ceremony UX"
 ## CLI (Zero-Ceremony)
 The CLI automatically discovers the local server and registers this process as an agent. No API keys or server flags required when running on the same host.
 
+### Help
+```bash
+opencortex --help
+opencortex skills --help
+opencortex skills install --help
+```
+
 ### Messaging
 ```bash
 opencortex send --to researcher "Analyse src/auth.go"
@@ -76,6 +83,19 @@ opencortex agents rotate-key <id>
 ```bash
 opencortex knowledge search "quantum computing"
 opencortex knowledge add --title "My Note" --file ./note.md
+```
+
+### Skills (Special Knowledge)
+```bash
+opencortex skills list
+opencortex skills search "openapi"
+opencortex skills add \
+  --title "OpenAPI Review" \
+  --slug openapi-review \
+  --file ./SKILL.md \
+  --repo openai/skills \
+  --path skills/.curated/openapi-review
+opencortex skills install openapi-review --target repo --platform all
 ```
 
 ### Advanced (Flags still supported)
@@ -206,6 +226,43 @@ summary: How the in-process broker handles delivery and backpressure.
 
 Details...
 ```
+
+## Skillset Knowledge Contract
+Skillsets are stored in `knowledge_entries` as special knowledge entries.
+
+Reserved tags:
+- `_special:skillset`
+- `_skill_slug:<normalized-slug>`
+
+Required metadata contract:
+```json
+{
+  "special_knowledge": {
+    "type": "skillset",
+    "schema_version": 1
+  },
+  "skillset": {
+    "slug": "my-skill",
+    "install": {
+      "repo": "owner/repo",
+      "path": "path/to/skill",
+      "ref": "main",
+      "method": "auto"
+    }
+  }
+}
+```
+
+`opencortex skills install` uses that `skillset.install` recipe, installs a canonical copy under:
+- Repo target (default): `<git-root>/.agents/skills/<slug>`
+- Global target: `~/.agents/skills/<slug>`
+
+It then creates best-effort projections (symlinks):
+- Codex: `.codex/skills/<slug>`
+- Copilot: `.github/copilot/<slug>.md`
+- Claude: `.claude/skills/<slug>.md`
+
+If projection links fail, installation still succeeds and prints warnings.
 
 ## Development
 ```bash
