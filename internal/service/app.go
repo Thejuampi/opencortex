@@ -177,6 +177,42 @@ func (a *App) RotateAgentKey(ctx context.Context, agentID, kind string) (string,
 	return raw, nil
 }
 
+// AutoRegisterLocal creates or re-identifies a local agent by fingerprint.
+// If an agent with the given fingerprint already exists its API key is rotated
+// and returned so the caller always gets a fresh, valid token. If no matching
+// fingerprint is found a new agent is created with role=agent.
+func (a *App) AutoRegisterLocal(ctx context.Context, name, fingerprint string) (model.Agent, string, error) {
+	if strings.TrimSpace(name) == "" {
+		name = "local-agent"
+	}
+
+	// If fingerprint provided, try to find existing agent.
+	if fingerprint != "" {
+		existing, err := a.Store.GetAgentByFingerprint(ctx, fingerprint)
+		if err == nil {
+			// Rotate key so the caller has a fresh session token.
+			raw, rotateErr := a.RotateAgentKey(ctx, existing.ID, "live")
+			if rotateErr != nil {
+				return model.Agent{}, "", rotateErr
+			}
+			_ = a.Store.UpdateLastSeen(ctx, existing.ID)
+			return existing, raw, nil
+		}
+		// err == sql.ErrNoRows → fall through to create
+	}
+
+	agent, raw, err := a.CreateAgent(ctx, repos.CreateAgentInput{
+		Name:        name,
+		Type:        model.AgentTypeAI,
+		Fingerprint: fingerprint,
+		Description: "Auto-registered local agent",
+		Status:      model.AgentStatusActive,
+		Tags:        []string{"auto"},
+		Metadata:    map[string]any{"source": "auto"},
+	}, "live", "")
+	return agent, raw, err
+}
+
 func (a *App) CreateTopic(ctx context.Context, in repos.CreateTopicInput) (model.Topic, error) {
 	if in.ID == "" {
 		in.ID = uuid.NewString()

@@ -14,6 +14,7 @@ type CreateAgentInput struct {
 	Name        string
 	Type        model.AgentType
 	APIKeyHash  string
+	Fingerprint string
 	Description string
 	Tags        []string
 	Status      model.AgentStatus
@@ -25,13 +26,18 @@ func (s *Store) CreateAgent(ctx context.Context, in CreateAgentInput) (model.Age
 	if in.Status == "" {
 		in.Status = model.AgentStatusActive
 	}
+	fingerprintVal := sql.NullString{}
+	if in.Fingerprint != "" {
+		fingerprintVal = sql.NullString{String: in.Fingerprint, Valid: true}
+	}
 	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO agents (id, name, type, api_key_hash, description, tags, status, metadata, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO agents (id, name, type, api_key_hash, fingerprint, description, tags, status, metadata, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.ID,
 		in.Name,
 		string(in.Type),
 		in.APIKeyHash,
+		fingerprintVal,
 		in.Description,
 		toJSON(in.Tags),
 		string(in.Status),
@@ -100,6 +106,13 @@ func (s *Store) GetAgentByAPIKeyHash(ctx context.Context, hash string) (model.Ag
 	row := s.DB.QueryRowContext(ctx, `
 SELECT id, name, type, description, tags, status, metadata, created_at, last_seen
 FROM agents WHERE api_key_hash = ?`, hash)
+	return scanAgent(row)
+}
+
+func (s *Store) GetAgentByFingerprint(ctx context.Context, fingerprint string) (model.Agent, error) {
+	row := s.DB.QueryRowContext(ctx, `
+SELECT id, name, type, description, tags, status, metadata, created_at, last_seen
+FROM agents WHERE fingerprint = ?`, fingerprint)
 	return scanAgent(row)
 }
 

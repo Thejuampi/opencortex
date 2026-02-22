@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +15,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -115,24 +120,31 @@ func main() {
 		Short: "Opencortex self-hosted multi-agent infrastructure node",
 		Long:  "Single-binary platform for multi-agent messaging, knowledge management, and selective sync.",
 		Example: strings.TrimSpace(`
-  opencortex init --config ./config.yaml
-  opencortex server --config ./config.yaml
-  opencortex agents list --api-key <admin-key>
-  opencortex knowledge search "sync conflicts" --api-key <key>
-  opencortex sync status --api-key <sync-key>`),
+  opencortex server                          # start once
+  opencortex send --to researcher "analyse src/auth.go"
+  opencortex inbox --wait
+  opencortex broadcast "deploying v2.1"
+  opencortex knowledge search "auth patterns"
+  opencortex agents`),
 	}
 	root.SetHelpFunc(renderHelp)
 	root.PersistentFlags().StringVar(&cfgPath, "config", "config.yaml", "Path to config file")
-	root.PersistentFlags().StringVar(&baseURL, "base-url", "http://localhost:8080", "Base API URL for CLI commands")
-	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for CLI commands")
+	root.PersistentFlags().StringVar(&baseURL, "base-url", discoverServerURL(), "Base API URL for CLI commands")
+	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for CLI commands (optional on localhost)")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON output")
 
 	root.AddCommand(newInitCommand(&cfgPath))
 	root.AddCommand(newServerCommand(&cfgPath))
 	root.AddCommand(newMCPServerCommand(&cfgPath))
+	root.AddCommand(newMCPCommand(&cfgPath)) // 'mcp' alias, no --api-key needed
 	root.AddCommand(newConfigCommand(&cfgPath))
 	root.AddCommand(newAuthCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newAgentsCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newAgentsShortCommand(&baseURL, &apiKey, &asJSON)) // 'agents' top-level
+	root.AddCommand(newSendCommand(&baseURL, &apiKey))
+	root.AddCommand(newInboxCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newWatchCommand(&baseURL, &apiKey))
+	root.AddCommand(newBroadcastCommand(&baseURL, &apiKey))
 	root.AddCommand(newKnowledgeCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newSyncCommand(&baseURL, &apiKey, &asJSON))
 	root.AddCommand(newAdminCommand(&baseURL, &apiKey, &asJSON))
@@ -141,6 +153,522 @@ func main() {
 		log.Fatal(err)
 	}
 }
+
+// ─── Zero-Ceremony Helpers ───────────────────────────────────────────────────
+
+// opencortexDir returns ~/.opencortex (created on demand).
+func opencortexDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.TempDir()
+	}
+	dir := filepath.Join(home, ".opencortex")
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
+}
+
+// serverFilePath is the file the server writes its URL to on start.
+func serverFilePath() string { return filepath.Join(opencortexDir(), "server") }
+
+// lockFilePath is the PID lock file used to prevent duplicate servers.
+func lockFilePath() string { return filepath.Join(opencortexDir(), "opencortex.lock") }
+
+// discoverServerURL returns the server URL using the lookup chain:
+//  1. OPENCORTEX_URL env var
+//  2. ~/.opencortex/server file
+//  3. http://localhost:8080 (default)
+func discoverServerURL() string {
+	if v := strings.TrimSpace(os.Getenv("OPENCORTEX_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if b, err := os.ReadFile(serverFilePath()); err == nil {
+		if u := strings.TrimSpace(string(b)); u != "" {
+			return strings.TrimRight(u, "/")
+		}
+	}
+	return "http://localhost:8080"
+}
+
+// writeServerFile writes the server URL to ~/.opencortex/server.
+func writeServerFile(serverURL string) {
+	_ = os.WriteFile(serverFilePath(), []byte(serverURL+"\n"), 0o600)
+}
+
+// removeServerFile removes the server URL file on shutdown.
+func removeServerFile() { _ = os.Remove(serverFilePath()) }
+
+// acquireServerLock creates a PID lock file. Returns an error (errAlreadyRunning)
+// if another opencortex server is already running.
+var errAlreadyRunning = errors.New("already running")
+
+func acquireServerLock(port int) (pid int, addr string, err error) {
+	path := lockFilePath()
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		// File exists — check if PID is alive.
+		parts := strings.SplitN(strings.TrimSpace(string(data)), " ", 2)
+		if len(parts) >= 1 {
+			if existingPID, parseErr := strconv.Atoi(parts[0]); parseErr == nil && existingPID > 0 {
+				if isProcessAlive(existingPID) {
+					listenAddr := fmt.Sprintf("http://localhost:%d", port)
+					if len(parts) >= 2 {
+						listenAddr = strings.TrimSpace(parts[1])
+					}
+					return existingPID, listenAddr, errAlreadyRunning
+				}
+			}
+		}
+		// Stale lock — remove it.
+		_ = os.Remove(path)
+	}
+	addr = fmt.Sprintf("http://localhost:%d", port)
+	content := fmt.Sprintf("%d %s\n", os.Getpid(), addr)
+	return os.Getpid(), addr, os.WriteFile(path, []byte(content), 0o600)
+}
+
+// releaseServerLock removes the PID lock file.
+func releaseServerLock() { _ = os.Remove(lockFilePath()) }
+
+// isProcessAlive returns true if a process with the given PID is running.
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	// On Windows os.FindProcess always succeeds; we use tasklist as a fallback.
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// Try sending signal 0 (POSIX); on Windows we use the exec-based check below.
+	if sigErr := proc.Signal(syscall.Signal(0)); sigErr == nil {
+		return true
+	}
+	// Windows fallback: check if PID is in tasklist.
+	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), strconv.Itoa(pid))
+}
+
+// localFingerprint builds a stable agent identity for the current CLI process.
+// hash(hostname + exe-name) — intentionally excludes PID so the same machine+binary
+// always maps to the same agent record.
+func localFingerprint() string {
+	hostname, _ := os.Hostname()
+	exe, _ := os.Executable()
+	exe = filepath.Base(exe)
+	h := sha256.Sum256([]byte(hostname + ":" + exe))
+	return "cli-" + hex.EncodeToString(h[:8])
+}
+
+// ensureLocalAuth returns a valid API key for baseURL.
+// If no key is saved and the server is local, it auto-registers.
+func ensureLocalAuth(baseURL string) string {
+	if saved, ok := authStoreGetToken(baseURL); ok {
+		return saved
+	}
+	// Only auto-register for localhost URLs.
+	if !isLocalURL(baseURL) {
+		return ""
+	}
+	fp := localFingerprint()
+	hostname, _ := os.Hostname()
+	agentName := "cli@" + hostname
+
+	body, err := json.Marshal(map[string]string{
+		"name":        agentName,
+		"fingerprint": fp,
+	})
+	if err != nil {
+		return ""
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Post(
+		strings.TrimRight(baseURL, "/")+"/api/v1/agents/auto-register",
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+	var out struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			APIKey string      `json:"api_key"`
+			Agent  model.Agent `json:"agent"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.OK {
+		return ""
+	}
+	key := out.Data.APIKey
+	if key == "" {
+		return ""
+	}
+	_ = authStoreUpsert(baseURL, key, map[string]any{
+		"id":   out.Data.Agent.ID,
+		"name": out.Data.Agent.Name,
+	}, []string{"agent"})
+	return key
+}
+
+// newAutoClient creates an API client, auto-registering on localhost if needed.
+func newAutoClient(baseURL, apiKey string) *apiClient {
+	if strings.TrimSpace(apiKey) == "" {
+		apiKey = ensureLocalAuth(baseURL)
+	}
+	return newAPIClient(baseURL, apiKey)
+}
+
+// isLocalURL returns true if the URL points to the local machine.
+func isLocalURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// resolveAgentByName queries the agents list and resolves a name to a single agent ID.
+// Returns error if zero or multiple agents match.
+func resolveAgentByName(client *apiClient, name string) (string, error) {
+	var out struct {
+		Agents []model.Agent `json:"agents"`
+	}
+	if err := client.do(http.MethodGet, "/api/v1/agents?q="+url.QueryEscape(name)+"&per_page=10", nil, &out); err != nil {
+		return "", err
+	}
+	// Filter exact or prefix matches.
+	var matches []model.Agent
+	lower := strings.ToLower(name)
+	for _, a := range out.Agents {
+		if strings.Contains(strings.ToLower(a.Name), lower) {
+			matches = append(matches, a)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no agent matching %q — run 'opencortex agents' to list available agents", name)
+	case 1:
+		return matches[0].ID, nil
+	default:
+		names := make([]string, len(matches))
+		for i, a := range matches {
+			names[i] = a.Name
+		}
+		return "", fmt.Errorf("ambiguous: found %s. Be more specific", strings.Join(names, ", "))
+	}
+}
+
+// ─── New Zero-Ceremony Commands ───────────────────────────────────────────────
+
+// newAgentsShortCommand is a top-level `opencortex agents` alias that lists
+// agents without needing any flags — auto-registers on localhost.
+func newAgentsShortCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   "agents",
+		Short: "List available agents (zero-config)",
+		Long:  "Lists all active agents. Auto-registers this CLI on localhost if needed.",
+		Example: strings.TrimSpace(`
+  opencortex agents
+  opencortex agents --json`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+			var out struct {
+				Agents []model.Agent `json:"agents"`
+			}
+			if err := client.do(http.MethodGet, "/api/v1/agents", nil, &out); err != nil {
+				return err
+			}
+			if *asJSON {
+				return printJSON(out)
+			}
+			return printAgentsTable(out.Agents)
+		},
+	}
+}
+
+// newSendCommand implements `opencortex send --to <name> <message>` and
+// `opencortex send --topic <id> <message>`.
+func newSendCommand(baseURL, apiKey *string) *cobra.Command {
+	var (
+		toAgent string
+		toTopic string
+		replyTo bool
+	)
+	cmd := &cobra.Command{
+		Use:   "send <message>",
+		Short: "Send a message to an agent or topic",
+		Long:  "Send a message without needing an API key (auto-registers on localhost).",
+		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+  opencortex send --to researcher "Please analyse src/auth.go"
+  opencortex send --topic tasks.review "Review PR #142"
+  opencortex send --to codex@machine-2 "Deploy to staging" --reply-to-me`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toAgent == "" && toTopic == "" {
+				return errors.New("one of --to or --topic is required")
+			}
+			client := newAutoClient(*baseURL, *apiKey)
+			body := map[string]any{
+				"content":      args[0],
+				"content_type": "text/plain",
+				"priority":     "normal",
+			}
+			if toTopic != "" {
+				body["topic_id"] = toTopic
+			}
+			if toAgent != "" {
+				agentID, err := resolveAgentByName(client, toAgent)
+				if err != nil {
+					return err
+				}
+				body["to_agent_id"] = agentID
+			}
+			if replyTo {
+				body["metadata"] = map[string]any{"reply_to_me": true}
+			}
+			var out map[string]any
+			if err := client.do(http.MethodPost, "/api/v1/messages", body, &out); err != nil {
+				return err
+			}
+			if msg, ok := out["message"].(map[string]any); ok {
+				fmt.Printf("sent message %s\n", msg["id"])
+			} else {
+				fmt.Println("sent")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&toAgent, "to", "", "Recipient agent name or partial name")
+	cmd.Flags().StringVar(&toTopic, "topic", "", "Topic ID to publish to")
+	cmd.Flags().BoolVar(&replyTo, "reply-to-me", false, "Request a reply back to this agent")
+	return cmd
+}
+
+// newInboxCommand implements `opencortex inbox [--wait] [--ack]`.
+func newInboxCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+	var (
+		waitMode bool
+		ackMode  bool
+	)
+	cmd := &cobra.Command{
+		Use:   "inbox",
+		Short: "Read messages in your inbox",
+		Long:  "Reads pending messages. Use --wait to block until at least one arrives.",
+		Example: strings.TrimSpace(`
+  opencortex inbox
+  opencortex inbox --wait
+  opencortex inbox --wait --ack`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+			type inboxResp struct {
+				Messages []map[string]any `json:"messages"`
+			}
+			deadline := time.Now().Add(30 * time.Second)
+			for {
+				var out inboxResp
+				if err := client.do(http.MethodGet, "/api/v1/messages?status=pending&limit=20", nil, &out); err != nil {
+					return err
+				}
+				if len(out.Messages) > 0 || !waitMode {
+					if *asJSON {
+						return printJSON(out)
+					}
+					if len(out.Messages) == 0 {
+						fmt.Println("inbox empty")
+						return nil
+					}
+					for _, m := range out.Messages {
+						printInboxMessage(m)
+						if ackMode {
+							if id, ok := m["id"].(string); ok {
+								_ = client.do(http.MethodPost, "/api/v1/messages/"+id+"/read", map[string]any{}, nil)
+							}
+						}
+					}
+					return nil
+				}
+				if time.Now().After(deadline) {
+					fmt.Println("timeout waiting for message")
+					return nil
+				}
+				time.Sleep(2 * time.Second)
+			}
+		},
+	}
+	cmd.Flags().BoolVar(&waitMode, "wait", false, "Block until a message arrives (up to 30s)")
+	cmd.Flags().BoolVar(&ackMode, "ack", false, "Mark messages as read after printing")
+	return cmd
+}
+
+func printInboxMessage(m map[string]any) {
+	id, _ := m["id"].(string)
+	from, _ := m["from_agent_id"].(string)
+	content, _ := m["content"].(string)
+	priority, _ := m["priority"].(string)
+	fmt.Printf("[%s] from=%s priority=%s\n  %s\n", id, from, priority, content)
+}
+
+// newWatchCommand implements `opencortex watch <topic> — streams messages.
+func newWatchCommand(baseURL, apiKey *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "watch <topic>",
+		Short: "Watch a topic for new messages",
+		Long:  "Polls the topic and prints messages as they arrive. Press Ctrl-C to stop.",
+		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+  opencortex watch tasks.review
+  opencortex watch system.broadcast`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+			topicID := args[0]
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			fmt.Printf("watching topic %q — Ctrl-C to stop\n", topicID)
+			seen := map[string]bool{}
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+				}
+				var out struct {
+					Messages []map[string]any `json:"messages"`
+				}
+				path := "/api/v1/messages?topic_id=" + url.QueryEscape(topicID) + "&limit=20&status=pending"
+				if err := client.do(http.MethodGet, path, nil, &out); err != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				}
+				for _, m := range out.Messages {
+					id, _ := m["id"].(string)
+					if seen[id] {
+						continue
+					}
+					seen[id] = true
+					printInboxMessage(m)
+				}
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(2 * time.Second):
+				}
+			}
+		},
+	}
+	return cmd
+}
+
+// newBroadcastCommand implements `opencortex broadcast <message>`.
+func newBroadcastCommand(baseURL, apiKey *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "broadcast <message>",
+		Short: "Broadcast a message to all agents",
+		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+  opencortex broadcast "All agents: deploying v2.1 in 5 minutes"`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+			var out map[string]any
+			if err := client.do(http.MethodPost, "/api/v1/messages/broadcast", map[string]any{
+				"content":      args[0],
+				"content_type": "text/plain",
+				"priority":     "normal",
+			}, &out); err != nil {
+				return err
+			}
+			if msg, ok := out["message"].(map[string]any); ok {
+				fmt.Printf("broadcast sent: %s\n", msg["id"])
+			} else {
+				fmt.Println("broadcast sent")
+			}
+			return nil
+		},
+	}
+}
+
+// newMCPCommand is the `opencortex mcp` alias for `mcp-server`.
+// On localhost it auto-registers so no --api-key is required.
+func newMCPCommand(cfgPath *string) *cobra.Command {
+	var logLevel string
+	cmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "Start MCP server over stdio (zero-config on localhost)",
+		Long: strings.TrimSpace(`
+Starts the MCP server over stdio. On localhost, auto-registers this process
+as an agent so no --api-key is needed.
+
+MCP config (minimal):
+  {"mcpServers": {"opencortex": {"command": "opencortex", "args": ["mcp"]}}}`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfigMaybe(*cfgPath)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(logLevel) != "" {
+				cfg.Logging.Level = strings.TrimSpace(logLevel)
+			}
+			if !cfg.MCP.Enabled {
+				return errors.New("mcp is disabled in config")
+			}
+
+			ctx := context.Background()
+			db, err := storage.Open(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			if err := storage.Migrate(ctx, db); err != nil {
+				return err
+			}
+			store := repos.New(db)
+			if err := store.SeedRBAC(ctx); err != nil {
+				return err
+			}
+			memBroker := broker.NewMemory(cfg.Broker.ChannelBufferSize)
+			app := service.New(cfg, store, memBroker)
+			if _, err := app.EnsureBroadcastSetup(ctx, ""); err != nil && !errors.Is(err, service.ErrNotFound) {
+				return err
+			}
+			syncEngine := syncer.NewEngine(db, store)
+			handler := handlers.New(app, db, cfg, syncEngine)
+			hub := ws.NewHub(app, store)
+			apiRouter := api.NewRouter(handler, app, hub)
+
+			// Auto-register via the service layer directly (we are in-process).
+			serverURL := discoverServerURL()
+			hostname, _ := os.Hostname()
+			fp := localFingerprint()
+			agentName := "mcp@" + hostname
+			_, effectiveKey, autoErr := app.AutoRegisterLocal(ctx, agentName, fp)
+			if autoErr != nil {
+				// Fall back to configured key.
+				effectiveKey = strings.TrimSpace(cfg.Auth.AdminKey)
+			}
+			if effectiveKey == "" {
+				return errors.New("could not obtain API key; set auth.admin_key in config or start the server first")
+			}
+			// Persist for future CLI calls.
+			_ = authStoreUpsert(serverURL, effectiveKey, map[string]any{
+				"name": agentName,
+			}, []string{"agent"})
+
+			mcpBridge := mcpbridge.New(mcpbridge.Options{
+				App:           app,
+				Config:        cfg,
+				Router:        apiRouter,
+				DefaultAPIKey: effectiveKey,
+			})
+			log.Printf("opencortex mcp started (stdio)")
+			return mcpBridge.ServeStdio()
+		},
+	}
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "Log level override")
+	return cmd
+}
+
+// ─── Existing command constructors follow ─────────────────────────────────────
 
 func newInitCommand(cfgPath *string) *cobra.Command {
 	var adminName string
@@ -204,7 +732,24 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 			if cmd.Flags().Changed("mcp-http-path") && strings.TrimSpace(mcpHTTPPath) != "" {
 				cfg.MCP.HTTP.Path = strings.TrimSpace(mcpHTTPPath)
 			}
-			ctx := context.Background()
+
+			// ── Single-instance enforcement ──────────────────────────────────
+			existingPID, serverAddr, lockErr := acquireServerLock(cfg.Server.Port)
+			if errors.Is(lockErr, errAlreadyRunning) {
+				fmt.Printf("OpenCortex is already running on this host (pid %d).\nConnect your agents to %s\n",
+					existingPID, serverAddr)
+				os.Exit(2)
+			}
+			if lockErr != nil {
+				return fmt.Errorf("acquire server lock: %w", lockErr)
+			}
+			defer releaseServerLock()
+			defer removeServerFile()
+			// ─────────────────────────────────────────────────────────────────
+
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
 			db, err := storage.Open(ctx, cfg)
 			if err != nil {
 				return err
@@ -288,8 +833,15 @@ func newServerCommand(cfgPath *string) *cobra.Command {
 				ReadTimeout:  config.ReadTimeout(cfg),
 				WriteTimeout: config.WriteTimeout(cfg),
 			}
+			serverURL := fmt.Sprintf("http://%s", httpServer.Addr)
+			if httpServer.Addr == "" || strings.HasPrefix(httpServer.Addr, ":") {
+				serverURL = fmt.Sprintf("http://localhost%s", httpServer.Addr)
+			}
+			writeServerFile(serverURL)
 			log.Printf("opencortex server listening on %s", config.Addr(cfg))
+			log.Printf("connect your agents to %s", serverURL)
 			return httpServer.ListenAndServe()
+
 		},
 	}
 	cmd.Flags().BoolVar(&mcpHTTPEnabled, "mcp-http-enabled", true, "Enable MCP streamable HTTP endpoint")

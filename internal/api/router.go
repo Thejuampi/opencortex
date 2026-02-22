@@ -22,6 +22,9 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/ws", hub.ServeWS)
 		api.Get("/admin/health", server.AdminHealth)
+		// Auto-registration: localhost-only, no API key required.
+		// Loopback enforcement is done inside the handler.
+		api.Post("/agents/auto-register", server.AutoRegister)
 
 		api.Group(func(protected chi.Router) {
 			protected.Use(apimw.RequireAuth(app))

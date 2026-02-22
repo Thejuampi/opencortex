@@ -29,73 +29,70 @@ Self-hostable, local-first infrastructure for multi-agent communication, shared 
 - RBAC (roles, permissions, assignment APIs)
 - Sync remotes, push/pull/diff/conflicts, sync logs
 - Embedded Svelte UI served by the same binary
-- CLI + Go SDK
+- CLI + Go SDK (`sdk.Connect()`)
 
 ## Quickstart
 ```bash
-cp config.example.yaml config.yaml
-go run ./cmd/opencortex init --config ./config.yaml
-go run ./cmd/opencortex server --config ./config.yaml
+go run ./cmd/opencortex server
 ```
-
 Open `http://localhost:8080`.
 
-## CLI
+On localhost, agents connect with **zero configuration**:
 ```bash
-opencortex init
-opencortex server --config ./config.yaml
-opencortex mcp-server --config ./config.yaml --api-key <agent-key>
+opencortex agents
+opencortex broadcast "Hello from Zero-Ceremony UX"
+```
 
-opencortex auth login --base-url http://localhost:8080 --api-key <key>
-opencortex auth status
-opencortex auth whoami
-opencortex auth logout --base-url http://localhost:8080
+## CLI (Zero-Ceremony)
+The CLI automatically discovers the local server and registers this process as an agent. No API keys or server flags required when running on the same host.
 
-opencortex agents list --api-key <admin-key>
-opencortex agents create --name researcher --type ai --api-key <admin-key>
-opencortex agents get <id> --api-key <admin-key>
-opencortex agents rotate-key <id> --api-key <admin-key>
+### Messaging
+```bash
+opencortex send --to researcher "Analyse src/auth.go"
+opencortex inbox --wait --ack
+opencortex watch tasks.review
+opencortex broadcast "Deploying v2.1"
+```
 
-opencortex knowledge search "quantum computing" --api-key <key>
-opencortex knowledge add --title "My Note" --file ./note.md --tags research,2024 --summary "Short abstract" --api-key <key>
-opencortex knowledge get <id> --api-key <key>
-opencortex knowledge export --collection <id> --format json --out ./export.json --api-key <key>
-opencortex knowledge import --file ./export.json --api-key <key>
+### Agents
+```bash
+opencortex agents                  # shorthand for list
+opencortex agents create --name researcher --type ai
+opencortex agents rotate-key <id>
+```
 
-opencortex sync remote add origin https://hub.example.com --key amk_remote_xxx --api-key <sync-key>
-opencortex sync remote list --api-key <sync-key>
-opencortex sync push origin --key amk_remote_xxx --api-key <sync-key>
-opencortex sync pull origin --key amk_remote_xxx --api-key <sync-key>
-opencortex sync status --api-key <sync-key>
-opencortex sync diff origin --api-key <sync-key>
-opencortex sync conflicts --api-key <sync-key>
-opencortex sync resolve <conflict-id> --strategy latest-wins --api-key <sync-key>
+### Knowledge
+```bash
+opencortex knowledge search "quantum computing"
+opencortex knowledge add --title "My Note" --file ./note.md
+```
 
-opencortex admin stats --api-key <admin-key>
-opencortex admin backup --api-key <admin-key>
-opencortex admin vacuum --api-key <admin-key>
-opencortex admin rbac roles --api-key <admin-key>
-opencortex admin rbac assign --agent <id> --role agent --api-key <admin-key>
-opencortex admin rbac revoke --agent <id> --role agent --api-key <admin-key>
+### Advanced (Flags still supported)
+```bash
+opencortex server --config ./custom.yaml
+opencortex auth login --base-url http://hub.example.com --api-key <key>
+opencortex sync status
+opencortex admin stats
 ```
 
 ## MCP (Copilot / Codex)
-OpenCortex exposes MCP tools as an agent-native interface over the same RBAC-backed REST logic.
+OpenCortex exposes MCP tools as an agent-native interface.
 
 ### Transports
-- STDIO: `opencortex mcp-server --config ./config.yaml --api-key <key>`
-- Streamable HTTP: enabled in `server` mode at `mcp.http.path` (default `/mcp`)
+- **Zero-config STDIO**: `opencortex mcp` (auto-registers on localhost)
+- Streamable HTTP: enabled in `server` mode at `/mcp`
 
-### Example Codex MCP config
-```toml
-[mcp_servers.opencortex]
-command = "opencortex"
-args = ["mcp-server", "--config", "./config.yaml", "--api-key", "amk_live_xxx"]
+### Example Codex MCP config (Minimal)
+```json
+{
+  "mcpServers": {
+    "opencortex": {
+      "command": "opencortex",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
-
-### Tool naming
-- One tool per REST operation with `<resource>_<action>` naming.
-- Examples: `messages_publish`, `messages_claim`, `knowledge_list`, `sync_push`, `admin_stats`.
 
 ## Reliable Message Delivery (Claim/Ack)
 New endpoints:
