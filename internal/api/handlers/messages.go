@@ -133,24 +133,64 @@ func (s *Server) Inbox(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
 		return
 	}
-	page := parseInt(r.URL.Query().Get("page"), 1)
-	perPage := parseInt(r.URL.Query().Get("limit"), 50)
-	msgs, total, err := s.App.Store.ListInbox(r.Context(), authCtx.Agent.ID, repos.MessageFilters{
-		Status:      r.URL.Query().Get("status"),
-		TopicID:     r.URL.Query().Get("topic_id"),
-		FromAgentID: r.URL.Query().Get("from_agent_id"),
-		Since:       r.URL.Query().Get("since"),
-		Priority:    r.URL.Query().Get("priority"),
-		Page:        page,
-		PerPage:     perPage,
-	})
+
+	filters := repos.GetInboxFilters{
+		TopicID:       r.URL.Query().Get("topic_id"),
+		FromAgentID:   r.URL.Query().Get("from_agent_id"),
+		Priority:      r.URL.Query().Get("priority"),
+		Limit:         parseInt(r.URL.Query().Get("limit"), 50),
+		MarkDelivered: r.URL.Query().Get("peek") != "true",
+		LeaseSeconds:  parseInt(r.URL.Query().Get("lease_seconds"), 300),
+		IncludeRead:   r.URL.Query().Get("all") == "true",
+		IncludeDead:   r.URL.Query().Get("dead") == "true",
+	}
+	cursor := r.URL.Query().Get("cursor")
+	waitSec := parseInt(r.URL.Query().Get("wait"), 0)
+
+	start := time.Now()
+	for {
+		msgs, newCursor, err := s.App.GetInboxAsync(r.Context(), authCtx.Agent.ID, cursor, filters)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+			return
+		}
+		if len(msgs) > 0 || waitSec <= 0 || time.Since(start).Seconds() >= float64(waitSec) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"messages": msgs,
+				"cursor":   newCursor,
+			}, nil)
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+}
+
+func (s *Server) Ack(w http.ResponseWriter, r *http.Request) {
+	authCtx, ok := service.AuthFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
+		return
+	}
+	var req struct {
+		IDs  []string `json:"ids"`
+		UpTo string   `json:"up_to"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
+		return
+	}
+
+	affected, err := s.App.AckMessages(r.Context(), authCtx.Agent.ID, req.IDs, req.UpTo)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs}, &pagination{
-		Page: page, PerPage: perPage, Total: total,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"acked": affected}, nil)
 }
 
 func (s *Server) GetMessage(w http.ResponseWriter, r *http.Request) {

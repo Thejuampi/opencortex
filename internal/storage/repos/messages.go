@@ -754,3 +754,321 @@ func normalizeCSV(v string) []string {
 	}
 	return out
 }
+
+func (s *Store) GetAgentCursor(ctx context.Context, agentID, channel string) (string, error) {
+	var cursor string
+	err := s.DB.QueryRowContext(ctx, "SELECT cursor FROM agent_cursors WHERE agent_id = ? AND channel = ?", agentID, channel).Scan(&cursor)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return cursor, nil
+}
+
+func (s *Store) SetAgentCursor(ctx context.Context, agentID, channel, cursor string) error {
+	now := nowUTC().Format(timeFormat)
+	_, err := s.DB.ExecContext(ctx, `
+INSERT INTO agent_cursors (agent_id, channel, cursor, updated_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(agent_id, channel) DO UPDATE SET
+  cursor = excluded.cursor,
+  updated_at = excluded.updated_at
+`, agentID, channel, cursor, now)
+	return err
+}
+
+func (s *Store) SweepDeliveries(ctx context.Context) (int64, int64, error) {
+	now := nowUTC().Format(timeFormat)
+	rx, err := s.DB.ExecContext(ctx, `
+UPDATE message_receipts
+SET status = 'pending',
+    attempt = attempt + 1,
+    ack_deadline_at = NULL,
+    claim_token = NULL,
+    claim_expires_at = NULL,
+    delivered_at = NULL
+WHERE status = 'delivered'
+  AND ack_deadline_at < ?
+  AND attempt < max_attempts`, now)
+	if err != nil {
+		return 0, 0, err
+	}
+	redelivered, _ := rx.RowsAffected()
+
+	dx, err := s.DB.ExecContext(ctx, `
+UPDATE message_receipts
+SET status = 'dead_letter'
+WHERE status = 'delivered'
+  AND ack_deadline_at < ?
+  AND attempt >= max_attempts`, now)
+	if err != nil {
+		return redelivered, 0, err
+	}
+	deadLettered, _ := dx.RowsAffected()
+
+	return redelivered, deadLettered, nil
+}
+
+func (s *Store) AckMessages(ctx context.Context, agentID string, messageIDs []string) (int64, error) {
+	if len(messageIDs) == 0 {
+		return 0, nil
+	}
+	now := nowUTC().Format(timeFormat)
+
+	placeholders := make([]string, len(messageIDs))
+	args := []any{now, now, agentID}
+	for i, id := range messageIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	query := fmt.Sprintf(`
+UPDATE message_receipts
+SET status = 'read',
+    read_at = coalesce(read_at, ?),
+    delivered_at = coalesce(delivered_at, ?)
+WHERE agent_id = ? AND message_id IN (%s) AND status IN ('pending', 'delivered')`, strings.Join(placeholders, ","))
+
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	affected, _ := res.RowsAffected()
+
+	if affected > 0 {
+		query2 := fmt.Sprintf(`
+UPDATE messages
+SET status = CASE WHEN status IN ('pending', 'delivered') THEN 'read' ELSE status END,
+    read_at = coalesce(read_at, ?),
+    delivered_at = coalesce(delivered_at, ?)
+WHERE id IN (%s)`, strings.Join(placeholders, ","))
+		args2 := []any{now, now}
+		for _, id := range messageIDs {
+			args2 = append(args2, id)
+		}
+		_, err = tx.ExecContext(ctx, query2, args2...)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, err
+		}
+	}
+
+	return affected, tx.Commit()
+}
+
+func (s *Store) AckUpTo(ctx context.Context, agentID, upToMessageID string) (int64, error) {
+	now := nowUTC().Format(timeFormat)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	query := `
+UPDATE message_receipts
+SET status = 'read', read_at = coalesce(read_at, ?), delivered_at = coalesce(delivered_at, ?)
+WHERE agent_id = ? AND status IN ('pending', 'delivered')
+  AND message_id IN (
+      SELECT m.id FROM messages m
+      JOIN messages target ON target.id = ?
+      WHERE m.created_at <= target.created_at
+  )`
+	res, err := tx.ExecContext(ctx, query, now, now, agentID, upToMessageID)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	affected, _ := res.RowsAffected()
+
+	if affected > 0 {
+		query2 := `
+UPDATE messages
+SET status = CASE WHEN status IN ('pending', 'delivered') THEN 'read' ELSE status END,
+    read_at = coalesce(read_at, ?),
+    delivered_at = coalesce(delivered_at, ?)
+WHERE status IN ('pending', 'delivered')
+  AND id IN (
+      SELECT mr.message_id FROM message_receipts mr WHERE mr.agent_id = ? AND mr.read_at = ?
+  )`
+		_, err = tx.ExecContext(ctx, query2, now, now, agentID, now)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, err
+		}
+	}
+
+	return affected, tx.Commit()
+}
+
+type GetInboxFilters struct {
+	CursorID      string
+	TopicID       string
+	FromAgentID   string
+	Priority      string
+	Limit         int
+	MarkDelivered bool
+	LeaseSeconds  int
+	IncludeRead   bool
+	IncludeDead   bool
+}
+
+func (s *Store) GetInboxMessagesAsync(ctx context.Context, agentID string, f GetInboxFilters) ([]model.Message, error) {
+	if f.Limit <= 0 {
+		f.Limit = 50
+	}
+	if f.LeaseSeconds <= 0 {
+		f.LeaseSeconds = 300
+	}
+	var cursorTime string
+	if f.CursorID != "" {
+		_ = s.DB.QueryRowContext(ctx, "SELECT created_at FROM messages WHERE id = ?", f.CursorID).Scan(&cursorTime)
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	args := []any{agentID, agentID}
+	where := `WHERE (mr.agent_id = ? OR (m.queue_mode = 1 AND mr.agent_id IS NULL AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = m.to_group_id AND gm.agent_id = ?)))`
+
+	if f.IncludeRead {
+		if f.IncludeDead {
+			// all except expired maybe? Or everything.
+		} else {
+			where += " AND mr.status IN ('pending', 'delivered', 'read')"
+		}
+	} else if f.IncludeDead {
+		where += " AND mr.status = 'dead_letter'"
+	} else {
+		where += " AND mr.status IN ('pending', 'delivered')"
+	}
+
+	if cursorTime != "" {
+		where += " AND m.created_at > ?"
+		args = append(args, cursorTime)
+	}
+	if f.TopicID != "" {
+		where += " AND m.topic_id = ?"
+		args = append(args, f.TopicID)
+	}
+	if f.FromAgentID != "" {
+		where += " AND m.from_agent_id = ?"
+		args = append(args, f.FromAgentID)
+	}
+	if f.Priority != "" {
+		where += " AND m.priority = ?"
+		args = append(args, f.Priority)
+	}
+
+	query := `
+SELECT m.id, m.from_agent_id, m.to_agent_id, m.topic_id, m.to_group_id, m.queue_mode, m.reply_to_id, m.content_type, m.content,
+       mr.status, m.priority, m.tags, m.metadata, m.created_at, m.expires_at, mr.delivered_at, mr.read_at, mr.agent_id
+FROM message_receipts mr
+JOIN messages m ON m.id = mr.message_id
+` + where + `
+ORDER BY 
+  CASE m.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 WHEN 'low' THEN 4 ELSE 5 END ASC,
+  m.created_at ASC
+LIMIT ?`
+	args = append(args, f.Limit)
+
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+
+	type match struct {
+		msg     model.Message
+		agentID sql.NullString
+	}
+	var matches []match
+	for rows.Next() {
+		var mrAgentID sql.NullString
+		// scanMessage reads up to read_at.
+		// We have an extra mr.agent_id to check if it's unassigned queue mode.
+		var m model.Message
+		var toAgent, topic, toGroup, replyTo, expiresAt, deliveredAt, readAt sql.NullString
+		var qm int
+		var status, priority, tags, metadata, createdAt string
+
+		if err := rows.Scan(
+			&m.ID, &m.FromAgentID, &toAgent, &topic, &toGroup, &qm, &replyTo, &m.ContentType, &m.Content,
+			&status, &priority, &tags, &metadata, &createdAt, &expiresAt, &deliveredAt, &readAt, &mrAgentID,
+		); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		if toAgent.Valid {
+			m.ToAgentID = &toAgent.String
+		}
+		if topic.Valid {
+			m.TopicID = &topic.String
+		}
+		if toGroup.Valid {
+			m.ToGroupID = &toGroup.String
+		}
+		m.QueueMode = qm == 1
+		if replyTo.Valid {
+			m.ReplyToID = &replyTo.String
+		}
+		m.Status = model.MessageStatus(status)
+		m.Priority = model.MessagePriority(priority)
+		m.Tags = fromJSON[[]string](tags)
+		m.Metadata = fromJSON[map[string]any](metadata)
+		m.CreatedAt = parseTS(createdAt)
+		m.ExpiresAt = parseTSPtr(expiresAt)
+		m.DeliveredAt = parseTSPtr(deliveredAt)
+		m.ReadAt = parseTSPtr(readAt)
+
+		matches = append(matches, match{msg: m, agentID: mrAgentID})
+	}
+	rows.Close()
+
+	if f.MarkDelivered {
+		now := nowUTC()
+		nowTS := now.Format(timeFormat)
+		deadlineTS := now.Add(time.Duration(f.LeaseSeconds) * time.Second).Format(timeFormat)
+
+		for i, match := range matches {
+			if match.msg.Status == model.MessageStatusPending {
+				if match.agentID.Valid {
+					_, _ = tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET status = 'delivered', delivered_at = ?, ack_deadline_at = ?
+WHERE message_id = ? AND agent_id = ? AND status = 'pending'`, nowTS, deadlineTS, match.msg.ID, match.agentID.String)
+				} else {
+					res, _ := tx.ExecContext(ctx, `
+UPDATE message_receipts
+SET status = 'delivered', delivered_at = ?, ack_deadline_at = ?, agent_id = ?
+WHERE message_id = ? AND agent_id IS NULL AND status = 'pending'`, nowTS, deadlineTS, agentID, match.msg.ID)
+					aff, _ := res.RowsAffected()
+					if aff == 0 {
+						// Another worker grabbed it, skip
+						continue
+					}
+				}
+				matches[i].msg.Status = model.MessageStatusDelivered
+				matches[i].msg.DeliveredAt = &now
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	out := make([]model.Message, 0, len(matches))
+	for _, match := range matches {
+		out = append(out, match.msg)
+	}
+	return out, nil
+}

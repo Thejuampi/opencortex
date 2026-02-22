@@ -68,8 +68,10 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 			// Messages
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages", server.CreateMessage)
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/broadcast", server.BroadcastMessage)
+			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages/inbox", server.Inbox)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages", server.Inbox)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Get("/messages/{id}", server.GetMessage)
+			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/ack", server.Ack)
 			protected.With(apimw.RequirePermission(app, "messages", "read")).Post("/messages/claim", server.ClaimMessages)
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/ack", server.AckMessageClaim)
 			protected.With(apimw.RequirePermission(app, "messages", "write")).Post("/messages/{id}/nack", server.NackMessageClaim)

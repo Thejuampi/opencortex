@@ -162,7 +162,7 @@ func TestMessageClaimAckAndRedelivery(t *testing.T) {
 		t.Fatalf("ack status: %d", resp.StatusCode)
 	}
 
-	readResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/messages?status=read", workerKey, nil)
+	readResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/messages?all=true", workerKey, nil)
 	defer readResp.Body.Close()
 	if readResp.StatusCode != http.StatusOK {
 		t.Fatalf("inbox status: %d", readResp.StatusCode)

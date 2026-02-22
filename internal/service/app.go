@@ -46,12 +46,23 @@ type App struct {
 }
 
 func New(cfg config.Config, store *repos.Store, broker broker.Broker) *App {
-	return &App{
+	a := &App{
 		Config:        cfg,
 		Store:         store,
 		Broker:        broker,
 		KnowledgeSink: make(chan model.KnowledgeEntry, 256),
 		AgentSink:     make(chan model.Agent, 256),
+	}
+	go a.sweepLoop()
+	return a
+}
+
+func (a *App) sweepLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		_, _, _ = a.Store.SweepDeliveries(context.Background())
 	}
 }
 
@@ -413,4 +424,46 @@ func parseExpiresIn(seconds int) *time.Time {
 
 func nowUTC() time.Time {
 	return time.Now().UTC()
+}
+
+func (a *App) GetInboxAsync(ctx context.Context, agentID, cursor string, filters repos.GetInboxFilters) ([]model.Message, string, error) {
+	if cursor == "" {
+		c, err := a.Store.GetAgentCursor(ctx, agentID, "mailbox")
+		if err != nil {
+			return nil, "", err
+		}
+		cursor = c
+	}
+	filters.CursorID = cursor
+	msgs, err := a.Store.GetInboxMessagesAsync(ctx, agentID, filters)
+	return msgs, cursor, err
+}
+
+func (a *App) AckMessages(ctx context.Context, agentID string, messageIDs []string, upTo string) (int64, error) {
+	var total int64
+	if len(messageIDs) > 0 {
+		affected, err := a.Store.AckMessages(ctx, agentID, messageIDs)
+		if err != nil {
+			return 0, err
+		}
+		total += affected
+	}
+	if upTo != "" {
+		affected, err := a.Store.AckUpTo(ctx, agentID, upTo)
+		if err != nil {
+			return total, err
+		}
+		total += affected
+		if err := a.SetCursor(ctx, agentID, "mailbox", upTo); err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+func (a *App) SetCursor(ctx context.Context, agentID, channel, cursor string) error {
+	if channel == "" {
+		channel = "mailbox"
+	}
+	return a.Store.SetAgentCursor(ctx, agentID, channel, cursor)
 }

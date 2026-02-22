@@ -43,7 +43,7 @@ func TestHubDirectMailboxDelivery(t *testing.T) {
 		t.Fatalf("create direct message: %v", err)
 	}
 
-	hint := readType(t, conn, "message_available")
+	hint := readType(t, conn, "delta")
 	if got := nestedString(hint, "data", "id"); got != msg.ID {
 		t.Fatalf("unexpected hint id: %s", got)
 	}

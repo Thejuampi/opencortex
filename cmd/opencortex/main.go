@@ -143,6 +143,8 @@ func main() {
 	root.AddCommand(newAgentsShortCommand(&baseURL, &apiKey, &asJSON)) // 'agents' top-level
 	root.AddCommand(newSendCommand(&baseURL, &apiKey))
 	root.AddCommand(newInboxCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newAckCommand(&baseURL, &apiKey))
+	root.AddCommand(newWorkerCommand(&baseURL, &apiKey))
 	root.AddCommand(newWatchCommand(&baseURL, &apiKey))
 	root.AddCommand(newBroadcastCommand(&baseURL, &apiKey))
 	root.AddCommand(newKnowledgeCommand(&baseURL, &apiKey, &asJSON))
@@ -450,56 +452,187 @@ func newSendCommand(baseURL, apiKey *string) *cobra.Command {
 // newInboxCommand implements `opencortex inbox [--wait] [--ack]`.
 func newInboxCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	var (
-		waitMode bool
-		ackMode  bool
+		waitStr  string
+		count    int
+		all      bool
+		priority string
+		from     string
+		topic    string
+		dead     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "inbox",
 		Short: "Read messages in your inbox",
-		Long:  "Reads pending messages. Use --wait to block until at least one arrives.",
+		Long:  "Reads pending messages. Use --wait to long-poll for new messages.",
 		Example: strings.TrimSpace(`
   opencortex inbox
-  opencortex inbox --wait
-  opencortex inbox --wait --ack`),
+  opencortex inbox --wait 30s
+  opencortex inbox --priority critical`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAutoClient(*baseURL, *apiKey)
-			type inboxResp struct {
-				Messages []map[string]any `json:"messages"`
+
+			query := url.Values{}
+			if count > 0 {
+				query.Set("limit", strconv.Itoa(count))
 			}
-			deadline := time.Now().Add(30 * time.Second)
-			for {
-				var out inboxResp
-				if err := client.do(http.MethodGet, "/api/v1/messages?status=pending&limit=20", nil, &out); err != nil {
-					return err
+			if all {
+				query.Set("all", "true")
+			}
+			if priority != "" {
+				query.Set("priority", priority)
+			}
+			if from != "" {
+				query.Set("from_agent_id", from)
+			}
+			if topic != "" {
+				query.Set("topic_id", topic)
+			}
+			if dead {
+				query.Set("dead", "true")
+			}
+
+			if waitStr != "" {
+				d, err := time.ParseDuration(waitStr)
+				if err != nil {
+					return fmt.Errorf("invalid wait duration: %w", err)
 				}
-				if len(out.Messages) > 0 || !waitMode {
-					if *asJSON {
-						return printJSON(out)
-					}
-					if len(out.Messages) == 0 {
-						fmt.Println("inbox empty")
-						return nil
-					}
-					for _, m := range out.Messages {
-						printInboxMessage(m)
-						if ackMode {
-							if id, ok := m["id"].(string); ok {
-								_ = client.do(http.MethodPost, "/api/v1/messages/"+id+"/read", map[string]any{}, nil)
-							}
+				query.Set("wait", strconv.Itoa(int(d.Seconds())))
+			}
+
+			var out struct {
+				Messages []map[string]any `json:"messages"`
+				Cursor   string           `json:"cursor"`
+			}
+			path := "/api/v1/messages/inbox?" + query.Encode()
+			if err := client.do(http.MethodGet, path, nil, &out); err != nil {
+				return err
+			}
+			if *asJSON {
+				return printJSON(out)
+			}
+			if len(out.Messages) == 0 {
+				fmt.Println("inbox empty")
+				return nil
+			}
+			for _, m := range out.Messages {
+				printInboxMessage(m)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&waitStr, "wait", "", "Block until a message arrives (e.g. '30s')")
+	cmd.Flags().IntVar(&count, "count", 50, "Max messages to fetch")
+	cmd.Flags().BoolVar(&all, "all", false, "Include read messages")
+	cmd.Flags().StringVar(&priority, "priority", "", "Filter by priority")
+	cmd.Flags().StringVar(&from, "from", "", "Filter by sender agent ID")
+	cmd.Flags().StringVar(&topic, "topic", "", "Filter by topic ID")
+	cmd.Flags().BoolVar(&dead, "dead", false, "Include dead-lettered messages")
+	return cmd
+}
+
+func newAckCommand(baseURL, apiKey *string) *cobra.Command {
+	var upTo string
+	cmd := &cobra.Command{
+		Use:   "ack [msgID...]",
+		Short: "Acknowledge messages",
+		Long:  "Marks messages as read (acked) and moves the inbox cursor.",
+		Example: strings.TrimSpace(`
+  opencortex ack msg_xxxx
+  opencortex ack --up-to msg_yyyy`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+			if len(args) == 0 && upTo == "" {
+				return errors.New("must provide message IDs or --up-to")
+			}
+
+			body := map[string]any{
+				"ids": args,
+			}
+			if upTo != "" {
+				body["up_to"] = upTo
+			}
+			var out struct {
+				Acked int64 `json:"acked"`
+			}
+			if err := client.do(http.MethodPost, "/api/v1/messages/ack", body, &out); err != nil {
+				return err
+			}
+			fmt.Printf("acked %d messages\n", out.Acked)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&upTo, "up-to", "", "Ack all messages up to and including this ID")
+	return cmd
+}
+
+func newWorkerCommand(baseURL, apiKey *string) *cobra.Command {
+	var (
+		topic   string
+		group   string
+		autoAck bool
+	)
+	cmd := &cobra.Command{
+		Use:   "worker <command> [args...]",
+		Short: "Run a command for each message in a blocking loop",
+		Args:  cobra.MinimumNArgs(1),
+		Example: strings.TrimSpace(`
+  opencortex worker my-script.sh
+  opencortex worker --topic tasks.review python handler.py`),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAutoClient(*baseURL, *apiKey)
+
+			exe := args[0]
+			cmdArgs := args[1:]
+
+			query := url.Values{}
+			query.Set("wait", "30") // default block
+			query.Set("limit", "10")
+			if topic != "" {
+				query.Set("topic_id", topic)
+			}
+			// group filtering is implicitly handled if group delivers direct messages, but wait, queue mode unassigned?
+			// The inbox query processes queue messages automatically for the agent if they are members of the to_group.
+
+			fmt.Printf("Worker started via %s. Waiting for messages...\n", discoverServerURL())
+			for {
+				var out struct {
+					Messages []map[string]any `json:"messages"`
+				}
+				if err := client.do(http.MethodGet, "/api/v1/messages/inbox?"+query.Encode(), nil, &out); err != nil {
+					fmt.Fprintf(os.Stderr, "poll error: %v\n", err)
+					time.Sleep(5 * time.Second)
+					continue
+				}
+
+				for _, m := range out.Messages {
+					msgID, _ := m["id"].(string)
+					b, _ := json.Marshal(m)
+
+					c := exec.Command(exe, cmdArgs...)
+					c.Env = append(os.Environ(), "OPENCORTEX_MESSAGE="+string(b))
+					c.Stdout = os.Stdout
+					c.Stderr = os.Stderr
+					c.Stdin = os.Stdin
+
+					fmt.Printf("Processing %s...\n", msgID)
+					err := c.Run()
+
+					if autoAck {
+						if err == nil {
+							var ackOut map[string]any
+							_ = client.do(http.MethodPost, "/api/v1/messages/ack", map[string]any{"ids": []string{msgID}}, &ackOut)
+							fmt.Printf("Acked %s\n", msgID)
+						} else {
+							fmt.Fprintf(os.Stderr, "Worker command failed for %s (no ack).\n", msgID)
 						}
 					}
-					return nil
 				}
-				if time.Now().After(deadline) {
-					fmt.Println("timeout waiting for message")
-					return nil
-				}
-				time.Sleep(2 * time.Second)
 			}
 		},
 	}
-	cmd.Flags().BoolVar(&waitMode, "wait", false, "Block until a message arrives (up to 30s)")
-	cmd.Flags().BoolVar(&ackMode, "ack", false, "Mark messages as read after printing")
+	cmd.Flags().StringVar(&topic, "topic", "", "Filter inbox by topic")
+	cmd.Flags().StringVar(&group, "group", "", "Filter inbox by group (future)")
+	cmd.Flags().BoolVar(&autoAck, "auto-ack", true, "Auto-ack message if command exits with 0")
 	return cmd
 }
 

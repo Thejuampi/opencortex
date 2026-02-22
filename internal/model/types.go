@@ -61,10 +61,11 @@ type Topic struct {
 type MessageStatus string
 
 const (
-	MessageStatusPending   MessageStatus = "pending"
-	MessageStatusDelivered MessageStatus = "delivered"
-	MessageStatusRead      MessageStatus = "read"
-	MessageStatusExpired   MessageStatus = "expired"
+	MessageStatusPending    MessageStatus = "pending"
+	MessageStatusDelivered  MessageStatus = "delivered"
+	MessageStatusRead       MessageStatus = "read"
+	MessageStatusExpired    MessageStatus = "expired"
+	MessageStatusDeadLetter MessageStatus = "dead_letter"
 )
 
 type MessagePriority string

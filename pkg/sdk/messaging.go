@@ -60,6 +60,12 @@ type ClaimedMessage struct {
 	ClaimAttempts  int       `json:"claim_attempts"`
 }
 
+type InitialImage struct {
+	TopicID  string
+	Cursor   string
+	Messages []Message
+}
+
 type MessagesService struct {
 	client *Client
 }
@@ -147,62 +153,83 @@ func (s *MessagesService) Renew(ctx context.Context, messageID, claimToken strin
 	return out.ClaimExpiresAt, nil
 }
 
-func (s *MessagesService) Subscribe(ctx context.Context, topicID string) (<-chan Message, error) {
+func (s *MessagesService) Subscribe(ctx context.Context, topicID, cursor string) (InitialImage, <-chan Message, error) {
 	if topicID == "" {
-		return nil, fmt.Errorf("topicID is required")
+		return InitialImage{}, nil, fmt.Errorf("topicID is required")
 	}
 	u, err := url.Parse(s.client.BaseURL)
 	if err != nil {
-		return nil, err
+		return InitialImage{}, nil, err
 	}
 	scheme := "ws"
 	if u.Scheme == "https" {
 		scheme = "wss"
 	}
 	wsURL := fmt.Sprintf("%s://%s/api/v1/ws?api_key=%s", scheme, u.Host, url.QueryEscape(s.client.APIKey))
-	out := make(chan Message, 64)
 
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return InitialImage{}, nil, err
+	}
+
+	_ = conn.WriteJSON(map[string]any{
+		"type":     "subscribe",
+		"topic_id": topicID,
+		"cursor":   cursor,
+	})
+
+	// Wait for the initial image
+	var initImg InitialImage
+	initTimeout := time.Now().Add(10 * time.Second)
+	_ = conn.SetReadDeadline(initTimeout)
+	for {
+		var frame map[string]any
+		if err := conn.ReadJSON(&frame); err != nil {
+			_ = conn.Close()
+			return InitialImage{}, nil, fmt.Errorf("failed to read initial image: %w", err)
+		}
+		typ, _ := frame["type"].(string)
+		if typ == "error" {
+			_ = conn.Close()
+			msg, _ := frame["message"].(string)
+			return InitialImage{}, nil, fmt.Errorf("subscribe error: %s", msg)
+		}
+		if typ == "initial_image" {
+			tid, _ := frame["topic_id"].(string)
+			if tid == topicID {
+				initImg.TopicID = tid
+				initImg.Cursor, _ = frame["cursor"].(string)
+
+				if msgsRaw, ok := frame["messages"].([]any); ok {
+					for _, rawMsgAny := range msgsRaw {
+						if rm, ok := rawMsgAny.(map[string]any); ok {
+							initImg.Messages = append(initImg.Messages, parseMessage(rm))
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+
+	out := make(chan Message, 64)
 	go func() {
 		defer close(out)
-		backoff := time.Second
 		for {
 			if ctx.Err() != nil {
+				_ = conn.Close()
 				return
 			}
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-			if err != nil {
-				time.Sleep(backoff)
-				if backoff < 30*time.Second {
-					backoff *= 2
-				}
-				continue
+			var frame map[string]any
+			if err := conn.ReadJSON(&frame); err != nil {
+				_ = conn.Close()
+				return
 			}
-			backoff = time.Second
-			_ = conn.WriteJSON(map[string]any{"type": "subscribe", "topic_id": topicID})
-			for {
-				if ctx.Err() != nil {
-					_ = conn.Close()
-					return
-				}
-				var frame map[string]any
-				if err := conn.ReadJSON(&frame); err != nil {
-					_ = conn.Close()
-					break
-				}
-				if t, _ := frame["type"].(string); strings.EqualFold(t, "message") {
-					raw, ok := frame["data"].(map[string]any)
-					if !ok {
-						continue
-					}
-					msg := Message{
-						ID:          asString(raw["id"]),
-						Content:     asString(raw["content"]),
-						ContentType: asString(raw["content_type"]),
-						FromAgentID: asString(raw["from_agent_id"]),
-						Priority:    Priority(asString(raw["priority"])),
-					}
+			if t, _ := frame["type"].(string); strings.EqualFold(t, "message") {
+				if raw, ok := frame["data"].(map[string]any); ok {
 					select {
-					case out <- msg:
+					case out <- parseMessage(raw):
 					case <-ctx.Done():
 						_ = conn.Close()
 						return
@@ -211,7 +238,17 @@ func (s *MessagesService) Subscribe(ctx context.Context, topicID string) (<-chan
 			}
 		}
 	}()
-	return out, nil
+	return initImg, out, nil
+}
+
+func parseMessage(raw map[string]any) Message {
+	return Message{
+		ID:          asString(raw["id"]),
+		Content:     asString(raw["content"]),
+		ContentType: asString(raw["content_type"]),
+		FromAgentID: asString(raw["from_agent_id"]),
+		Priority:    Priority(asString(raw["priority"])),
+	}
 }
 
 func asString(v any) string {

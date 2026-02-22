@@ -96,7 +96,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	_ = c.write(map[string]any{"type": "ack", "ok": true, "ref_id": "connected"})
 	c.startMailbox()
-	_ = c.subscribeTopic(service.SystemBroadcastTopicID)
+	_ = c.subscribeTopic(service.SystemBroadcastTopicID, "")
 	for {
 		_, b, err := conn.ReadMessage()
 		if err != nil {
@@ -113,11 +113,12 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 			_ = c.write(map[string]any{"type": "pong"})
 		case "subscribe":
 			topicID, _ := req["topic_id"].(string)
+			cursor, _ := req["cursor"].(string)
 			if topicID == "" {
 				_ = c.write(map[string]any{"type": "error", "code": "VALIDATION_ERROR", "message": "topic_id required"})
 				continue
 			}
-			if err := c.subscribeTopic(topicID); err != nil {
+			if err := c.subscribeTopic(topicID, cursor); err != nil {
 				_ = c.write(map[string]any{"type": "error", "code": "SUBSCRIBE_FAILED", "message": err.Error()})
 				continue
 			}
@@ -177,7 +178,7 @@ func (c *client) write(v any) error {
 	return c.conn.WriteJSON(v)
 }
 
-func (c *client) subscribeTopic(topicID string) error {
+func (c *client) subscribeTopic(topicID, cursor string) error {
 	if _, exists := c.topicCancel[topicID]; exists {
 		return nil
 	}
@@ -190,6 +191,18 @@ func (c *client) subscribeTopic(topicID string) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.topicCancel[topicID] = cancel
+
+	msgs, newCursor, _ := c.app.GetInboxAsync(ctx, c.auth.Agent.ID, cursor, repos.GetInboxFilters{TopicID: topicID, Limit: 100})
+	if msgs == nil {
+		msgs = []model.Message{}
+	}
+	_ = c.write(map[string]any{
+		"type":     "initial_image",
+		"topic_id": topicID,
+		"cursor":   newCursor,
+		"messages": msgs,
+	})
+
 	go func() {
 		for {
 			select {
@@ -200,8 +213,9 @@ func (c *client) subscribeTopic(topicID string) error {
 					return
 				}
 				_ = c.write(map[string]any{
-					"type": "message_available",
-					"data": messageHint(msg),
+					"type":     "delta",
+					"topic_id": topicID,
+					"data":     messageHint(msg),
 				})
 				_ = c.write(map[string]any{"type": "message", "data": msg})
 			}
@@ -265,6 +279,17 @@ func (c *client) startMailbox() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mailboxStop = cancel
+	msgs, newCursor, _ := c.app.GetInboxAsync(ctx, c.auth.Agent.ID, "", repos.GetInboxFilters{Limit: 100})
+	if msgs == nil {
+		msgs = []model.Message{}
+	}
+	_ = c.write(map[string]any{
+		"type":     "initial_image",
+		"topic_id": "",
+		"cursor":   newCursor,
+		"messages": msgs,
+	})
+
 	go func() {
 		for {
 			select {
@@ -275,8 +300,9 @@ func (c *client) startMailbox() {
 					return
 				}
 				_ = c.write(map[string]any{
-					"type": "message_available",
-					"data": messageHint(msg),
+					"type":     "delta",
+					"topic_id": "",
+					"data":     messageHint(msg),
 				})
 				_ = c.write(map[string]any{"type": "message", "data": msg})
 			}
