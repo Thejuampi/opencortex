@@ -5,17 +5,207 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OpenCortex Manual Setup</title>
   <style>
-    body { font-family: "Space Grotesk", "Segoe UI", sans-serif; margin: 2rem auto; max-width: 860px; padding: 0 1rem; background: #f8fbff; color: #12203b; }
-    code { font-family: "IBM Plex Mono", Consolas, monospace; background: #ecf3ff; padding: .1rem .3rem; border-radius: 6px; }
+    :root {
+      --bg-0: #05080f;
+      --bg-1: #0b1221;
+      --text: #e8eefc;
+      --muted: #8fa5c8;
+      --accent: #6366f1;
+      --line: rgba(114, 145, 198, 0.24);
+      --panel: rgba(14, 25, 46, 0.75);
+      --panel-strong: rgba(12, 22, 40, 0.94);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1000px 500px at 6% -8%, rgba(99, 102, 241, 0.22), transparent 70%),
+        radial-gradient(900px 520px at 100% 100%, rgba(55, 120, 226, 0.18), transparent 65%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+      min-height: 100vh;
+    }
+    .backglow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(700px 300px at 50% 22%, rgba(99, 102, 241, 0.16), transparent 70%);
+      filter: blur(24px);
+      opacity: 0.9;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 2.1rem 1rem 3rem;
+      position: relative;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: .42rem;
+      color: #9bb2d5;
+      text-decoration: none;
+      font-size: .92rem;
+      margin-bottom: 1rem;
+    }
+    .back-link:hover { color: #dbe7ff; text-decoration: underline; }
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 22px 56px rgba(2, 7, 14, 0.55);
+      padding: 1.5rem 1.6rem;
+    }
+    h1 {
+      margin: 0;
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      font-size: clamp(1.9rem, 5.4vw, 3.4rem);
+    }
+    .suite {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 18px 42px rgba(2, 7, 14, 0.45);
+      padding: .82rem;
+      display: grid;
+      gap: .72rem;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel-strong);
+      padding: .92rem;
+      display: grid;
+      gap: .62rem;
+    }
+    .step-head {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+    }
+    .badge {
+      width: 1.45rem;
+      height: 1.45rem;
+      border-radius: 999px;
+      border: 1px solid rgba(99, 102, 241, 0.55);
+      color: #e7e8ff;
+      background: rgba(99, 102, 241, 0.2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .78rem;
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      flex: 0 0 auto;
+    }
+    p { margin: 0; color: var(--muted); line-height: 1.52; }
+    .cmd {
+      margin-top: .1rem;
+      display: flex;
+      gap: .65rem;
+      align-items: center;
+      flex-wrap: wrap;
+      background: linear-gradient(180deg, rgba(8, 18, 34, 0.9), rgba(4, 10, 20, 0.95));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: .78rem .86rem;
+      position: relative;
+      z-index: 1;
+    }
+    .cmd::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      background: linear-gradient(120deg, rgba(99, 102, 241, 0.35), transparent 25%, transparent 75%, rgba(99, 102, 241, 0.28));
+      z-index: -1;
+      filter: blur(8px);
+      opacity: 0.6;
+    }
+    code {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      color: #dfe2ff;
+      font-size: .95rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    button {
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 999px;
+      padding: .5rem .9rem;
+      font-weight: 700;
+      cursor: pointer;
+      background: rgba(99, 102, 241, 0.12);
+      color: var(--text);
+      transition: transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(99, 102, 241, 0.58);
+      background: rgba(99, 102, 241, 0.2);
+    }
+    .inline-link {
+      color: #b9d9ff;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .inline-link:hover { color: #def0ff; text-decoration: underline; }
+    @media (max-width: 640px) {
+      .hero { padding: 1.25rem; }
+      button { width: 100%; }
+    }
   </style>
 </head>
 <body>
-  <h1>Manual Setup</h1>
-  <p>If automatic setup fails due to permission restrictions, install binary first and then run:</p>
-  <pre><code>opencortex init --all
-opencortex server</code></pre>
-  <p>For MCP only:</p>
-  <pre><code>opencortex init --mcp-only</code></pre>
-  <p>Back to <a href="./index.html">landing page</a>.</p>
+  <div class="backglow"></div>
+  <main class="wrap">
+    <a class="back-link" href="./index.html" aria-label="Back to landing page">← Back to landing page</a>
+
+    <section class="hero">
+      <h1>Manual Setup</h1>
+    </section>
+
+    <section class="suite">
+      <article class="step">
+        <div class="step-head"><span class="badge">1</span></div>
+        <p>If automatic setup fails due to permission restrictions, install binary first and then run:</p>
+        <div class="cmd">
+          <code id="cmd-init">opencortex init --all
+opencortex server</code>
+          <button id="copy-init">Copy</button>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="step-head"><span class="badge">2</span></div>
+        <p>For MCP only:</p>
+        <div class="cmd">
+          <code id="cmd-mcp">opencortex init --mcp-only</code>
+          <button id="copy-mcp">Copy</button>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="step-head"><span class="badge">3</span></div>
+        <p>Back to <a class="inline-link" href="./index.html">landing page</a>.</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    function copy(id) {
+      const text = document.getElementById(id).textContent;
+      navigator.clipboard.writeText(text);
+    }
+    document.getElementById('copy-init').addEventListener('click', () => copy('cmd-init'));
+    document.getElementById('copy-mcp').addEventListener('click', () => copy('cmd-mcp'));
+  </script>
 </body>
 </html>
