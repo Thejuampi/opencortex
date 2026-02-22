@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  opencortex:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+      - ./config.example.yaml:/app/config.yaml
+    environment:
+      - OPENCORTEX_DB_PATH=/app/data/opencortex.db
+

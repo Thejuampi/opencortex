@@ -1,0 +1,29 @@
+# Go
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# SQLite/state
+*.db
+*.db-shm
+*.db-wal
+backups/
+data/
+
+# Node
+web/node_modules/
+
+# Build artifacts
+web/dist/
+coverage.out
+
+# IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+

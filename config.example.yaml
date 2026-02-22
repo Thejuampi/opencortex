@@ -1,0 +1,47 @@
+mode: local
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: "30s"
+  write_timeout: "30s"
+  cors_origins:
+    - "http://localhost:3000"
+
+database:
+  path: "./opencortex.db"
+  wal_mode: true
+  max_connections: 10
+  backup_interval: "1h"
+  backup_path: "./backups/"
+
+auth:
+  enabled: true
+  admin_key: ""
+  token_expiry: "never"
+
+broker:
+  channel_buffer_size: 256
+  message_ttl_default: "7d"
+  max_message_size_kb: 512
+
+knowledge:
+  max_entry_size_kb: 1024
+  fts_enabled: true
+  version_history: true
+  max_versions_kept: 100
+
+sync:
+  enabled: false
+  remotes: []
+
+ui:
+  enabled: true
+  title: "Opencortex"
+  theme: "auto"
+
+logging:
+  level: "info"
+  format: "json"
+  file: ""
+
