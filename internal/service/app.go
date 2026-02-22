@@ -13,6 +13,7 @@ import (
 	"opencortex/internal/auth"
 	"opencortex/internal/broker"
 	"opencortex/internal/config"
+	"opencortex/internal/knowledge"
 	"opencortex/internal/model"
 	"opencortex/internal/storage/repos"
 )
@@ -212,6 +213,12 @@ func (a *App) CreateKnowledge(ctx context.Context, in repos.CreateKnowledgeInput
 	if in.ID == "" {
 		in.ID = uuid.NewString()
 	}
+	if in.Summary == nil || strings.TrimSpace(*in.Summary) == "" {
+		auto := knowledge.GenerateAbstract(in.Content, 280)
+		if auto != "" {
+			in.Summary = &auto
+		}
+	}
 	entry, err := a.Store.CreateKnowledge(ctx, in)
 	if err != nil {
 		return model.KnowledgeEntry{}, err
@@ -224,6 +231,12 @@ func (a *App) CreateKnowledge(ctx context.Context, in repos.CreateKnowledgeInput
 }
 
 func (a *App) UpdateKnowledgeContent(ctx context.Context, in repos.UpdateKnowledgeContentInput) (model.KnowledgeEntry, error) {
+	if in.Summary == nil || strings.TrimSpace(*in.Summary) == "" {
+		auto := knowledge.GenerateAbstract(in.Content, 280)
+		if auto != "" {
+			in.Summary = &auto
+		}
+	}
 	entry, err := a.Store.UpdateKnowledgeContent(ctx, in)
 	if err != nil {
 		return model.KnowledgeEntry{}, err

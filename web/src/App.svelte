@@ -36,7 +36,8 @@
   })
 
   function authHeaders() {
-    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+    const key = apiKey.trim()
+    return key ? { Authorization: `Bearer ${key}` } : {}
   }
 
   async function fetchJSON(path) {
@@ -47,6 +48,15 @@
   }
 
   async function loadData() {
+    if (!apiKey.trim()) {
+      stats = {}
+      knowledge = []
+      messages = []
+      agents = []
+      remotes = []
+      conflicts = []
+      return
+    }
     if (route === '/') {
       const statData = await fetchJSON('/admin/stats')
       stats = statData?.stats || {}
@@ -73,9 +83,10 @@
   }
 
   function connectWS() {
-    if (!apiKey) return
+    const key = apiKey.trim()
+    if (!key) return
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
-    ws = new WebSocket(`${protocol}://${location.host}/api/v1/ws?api_key=${encodeURIComponent(apiKey)}`)
+    ws = new WebSocket(`${protocol}://${location.host}/api/v1/ws?api_key=${encodeURIComponent(key)}`)
     ws.onopen = () => {
       wsState = 'connected'
       ws.send(JSON.stringify({ type: 'ping' }))
@@ -95,6 +106,7 @@
   }
 
   function saveKey() {
+    apiKey = apiKey.trim()
     localStorage.setItem('opencortex_api_key', apiKey)
     connectWS()
     loadData()

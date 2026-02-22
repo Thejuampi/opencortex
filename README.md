@@ -20,6 +20,7 @@ Self-hostable, local-first infrastructure for multi-agent communication, shared 
 - REST + WebSocket API (`/api/v1`)
 - In-process message broker with SQLite durability
 - Versioned knowledge base with FTS5 search
+- Auto-generated knowledge abstracts (optional override via API/CLI)
 - Topic subscriptions and invite-only topic members
 - RBAC (roles, permissions, assignment APIs)
 - Sync remotes, push/pull/diff/conflicts, sync logs
@@ -40,13 +41,18 @@ Open `http://localhost:8080`.
 opencortex init
 opencortex server --config ./config.yaml
 
+opencortex auth login --base-url http://localhost:8080 --api-key <key>
+opencortex auth status
+opencortex auth whoami
+opencortex auth logout --base-url http://localhost:8080
+
 opencortex agents list --api-key <admin-key>
 opencortex agents create --name researcher --type ai --api-key <admin-key>
 opencortex agents get <id> --api-key <admin-key>
 opencortex agents rotate-key <id> --api-key <admin-key>
 
 opencortex knowledge search "quantum computing" --api-key <key>
-opencortex knowledge add --title "My Note" --file ./note.md --tags research,2024 --api-key <key>
+opencortex knowledge add --title "My Note" --file ./note.md --tags research,2024 --summary "Short abstract" --api-key <key>
 opencortex knowledge get <id> --api-key <key>
 opencortex knowledge export --collection <id> --format json --out ./export.json --api-key <key>
 opencortex knowledge import --file ./export.json --api-key <key>
@@ -79,6 +85,26 @@ All endpoints use:
   "error": null,
   "pagination": { "page": 1, "per_page": 50, "total": 0 }
 }
+```
+
+## Knowledge Document Format
+`summary` is optional in API/CLI, but recommended.
+
+If `summary` is omitted, Opencortex derives it deterministically using:
+1. Front matter at document top: `summary:` or `abstract:`
+2. First paragraph marker: `Abstract:` / `Summary:` / `~abstract:`
+3. First meaningful paragraph fallback
+
+Example:
+```markdown
+---
+title: Broker Design
+summary: How the in-process broker handles delivery and backpressure.
+---
+
+# Broker Design
+
+Details...
 ```
 
 ## Development
