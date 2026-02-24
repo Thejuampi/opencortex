@@ -10,7 +10,25 @@ permissions:
   contents: write
 
 jobs:
+  web-sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+      - name: Build web dist
+        run: |
+          cd web
+          npm ci
+          npm run build
+      - name: Verify embedded webui dist is in sync
+        run: diff -qr web/dist internal/webui/dist
+
   build:
+    needs: web-sync-check
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

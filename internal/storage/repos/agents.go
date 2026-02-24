@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"opencortex/internal/model"
 )
@@ -167,6 +168,201 @@ func (s *Store) RotateAgentKey(ctx context.Context, id, newHash string) error {
 func (s *Store) UpdateLastSeen(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, "UPDATE agents SET last_seen = ? WHERE id = ?", nowUTC().Format(timeFormat), id)
 	return err
+}
+
+func (s *Store) DeleteInactiveAutoAgentsCascade(ctx context.Context, cutoff time.Time) (int64, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+SELECT a.id
+FROM agents a
+WHERE a.status = 'active'
+  AND a.tags LIKE '%"auto"%'
+  AND COALESCE(a.last_seen, a.created_at) <= ?
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent_roles ar
+    JOIN roles r ON r.id = ar.role_id
+    WHERE ar.agent_id = a.id AND r.name = 'admin'
+  )`, cutoff.UTC().Format(timeFormat))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := deleteAgentCascadeTx(ctx, tx, id); err != nil {
+			_ = tx.Rollback()
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int64(len(ids)), nil
+}
+
+func deleteAgentCascadeTx(ctx context.Context, tx *sql.Tx, agentID string) error {
+	topicIDs, err := selectStringColumnTx(ctx, tx, "SELECT id FROM topics WHERE created_by = ?", agentID)
+	if err != nil {
+		return err
+	}
+	groupIDs, err := selectStringColumnTx(ctx, tx, "SELECT id FROM groups WHERE created_by = ?", agentID)
+	if err != nil {
+		return err
+	}
+	collectionIDs, err := selectStringColumnTx(ctx, tx, "SELECT id FROM collections WHERE created_by = ?", agentID)
+	if err != nil {
+		return err
+	}
+
+	msgIDs, err := selectMessageIDsForAgentCascade(ctx, tx, agentID, topicIDs, groupIDs)
+	if err != nil {
+		return err
+	}
+	if len(msgIDs) > 0 {
+		if _, err := execInTx(ctx, tx, "UPDATE messages SET reply_to_id = NULL WHERE reply_to_id IN (%s)", msgIDs); err != nil {
+			return err
+		}
+		if _, err := execInTx(ctx, tx, "DELETE FROM messages WHERE id IN (%s)", msgIDs); err != nil {
+			return err
+		}
+	}
+
+	// Preserve surviving knowledge while removing hard references to deleted agent.
+	if _, err := tx.ExecContext(ctx, "UPDATE knowledge_entries SET updated_by = created_by WHERE updated_by = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE knowledge_versions
+SET changed_by = (
+  SELECT ke.created_by FROM knowledge_entries ke WHERE ke.id = knowledge_versions.knowledge_id
+)
+WHERE changed_by = ?`, agentID); err != nil {
+		return err
+	}
+
+	if len(collectionIDs) > 0 {
+		if _, err := execInTx(ctx, tx, "DELETE FROM knowledge_entries WHERE collection_id IN (%s)", collectionIDs); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM knowledge_entries WHERE created_by = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM knowledge_versions WHERE changed_by = ?", agentID); err != nil {
+		return err
+	}
+
+	if len(topicIDs) > 0 {
+		if _, err := execInTx(ctx, tx, "DELETE FROM topics WHERE id IN (%s)", topicIDs); err != nil {
+			return err
+		}
+	}
+	if len(groupIDs) > 0 {
+		if _, err := execInTx(ctx, tx, "DELETE FROM groups WHERE id IN (%s)", groupIDs); err != nil {
+			return err
+		}
+	}
+	if len(collectionIDs) > 0 {
+		if _, err := execInTx(ctx, tx, "DELETE FROM collections WHERE id IN (%s)", collectionIDs); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM topic_members WHERE added_by = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM audit_logs WHERE agent_id = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_cursors WHERE agent_id = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agents WHERE id = ?", agentID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func selectMessageIDsForAgentCascade(ctx context.Context, tx *sql.Tx, agentID string, topicIDs, groupIDs []string) ([]string, error) {
+	query := "SELECT id FROM messages WHERE from_agent_id = ? OR to_agent_id = ?"
+	args := []any{agentID, agentID}
+	if len(topicIDs) > 0 {
+		in, inArgs := inClause(topicIDs)
+		query += " OR topic_id IN (" + in + ")"
+		args = append(args, inArgs...)
+	}
+	if len(groupIDs) > 0 {
+		in, inArgs := inClause(groupIDs)
+		query += " OR to_group_id IN (" + in + ")"
+		args = append(args, inArgs...)
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func selectStringColumnTx(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func execInTx(ctx context.Context, tx *sql.Tx, queryFmt string, ids []string) (sql.Result, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	in, args := inClause(ids)
+	return tx.ExecContext(ctx, fmt.Sprintf(queryFmt, in), args...)
+}
+
+func inClause(ids []string) (string, []any) {
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	return strings.Join(placeholders, ","), args
 }
 
 func scanAgent(scanner interface {

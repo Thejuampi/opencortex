@@ -123,7 +123,7 @@ func (s *Store) SearchKnowledge(ctx context.Context, f KnowledgeFilters) ([]mode
 	args := []any{}
 	if f.Query != "" {
 		where += " AND ke.rowid IN (SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH ?)"
-		args = append(args, f.Query)
+		args = append(args, ftsLiteralQuery(f.Query))
 	}
 	if f.CollectionID != "" {
 		where += " AND ke.collection_id = ?"
@@ -172,6 +172,22 @@ LIMIT ? OFFSET ?`
 		out = append(out, e)
 	}
 	return out, total, rows.Err()
+}
+
+func ftsLiteralQuery(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Fields(raw)
+	if len(parts) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, `"`+strings.ReplaceAll(part, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, " ")
 }
 
 func (s *Store) UpdateKnowledgeContent(ctx context.Context, in UpdateKnowledgeContentInput) (model.KnowledgeEntry, error) {

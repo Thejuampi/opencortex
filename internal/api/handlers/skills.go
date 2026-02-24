@@ -15,8 +15,11 @@ import (
 	"opencortex/internal/model"
 	"opencortex/internal/service"
 	skillmeta "opencortex/internal/skills"
+	skillinstall "opencortex/internal/skills/install"
 	"opencortex/internal/storage/repos"
 )
+
+var runSkillInstall = skillinstall.Install
 
 func (s *Server) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	authCtx, ok := service.AuthFromContext(r.Context())
@@ -433,6 +436,52 @@ func (s *Server) UnpinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"skill": view}, nil)
+}
+
+func (s *Server) InstallSkill(w http.ResponseWriter, r *http.Request) {
+	_, view, err := s.getSkillByID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		if mapServiceErr(w, err) {
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		return
+	}
+
+	var req struct {
+		Target   string `json:"target"`
+		Platform string `json:"platform"`
+		Force    bool   `json:"force"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body")
+		return
+	}
+	req.Target = strings.ToLower(strings.TrimSpace(req.Target))
+	if req.Target == "" {
+		req.Target = "global"
+	}
+	if req.Target != "global" {
+		writeErr(w, http.StatusBadRequest, "VALIDATION_ERROR", "target must be global for server install")
+		return
+	}
+	req.Platform = strings.ToLower(strings.TrimSpace(req.Platform))
+	if req.Platform == "" {
+		req.Platform = "all"
+	}
+
+	result, err := runSkillInstall(r.Context(), skillinstall.Request{
+		Slug:     view.Slug,
+		Install:  view.Install,
+		Target:   req.Target,
+		Platform: req.Platform,
+		Force:    req.Force,
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"result": result}, nil)
 }
 
 func (s *Server) getSkillByID(ctx context.Context, id string) (model.KnowledgeEntry, skillmeta.SkillView, error) {

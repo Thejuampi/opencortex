@@ -58,6 +58,9 @@ type Config struct {
 		VersionHistory  bool `yaml:"version_history"`
 		MaxVersionsKept int  `yaml:"max_versions_kept"`
 	} `yaml:"knowledge"`
+	Agents struct {
+		AutoDeactivateAfter string `yaml:"auto_deactivate_after"`
+	} `yaml:"agents"`
 	Sync struct {
 		Enabled bool     `yaml:"enabled"`
 		Remotes []Remote `yaml:"remotes"`
@@ -118,6 +121,7 @@ func Default() Config {
 	cfg.Knowledge.FTSEnabled = true
 	cfg.Knowledge.VersionHistory = true
 	cfg.Knowledge.MaxVersionsKept = 100
+	cfg.Agents.AutoDeactivateAfter = "168h"
 	cfg.Sync.Enabled = false
 	cfg.UI.Enabled = true
 	cfg.UI.Title = "Opencortex"
@@ -192,6 +196,9 @@ func overrideFromEnv(cfg *Config) {
 	if v := os.Getenv("OPENCORTEX_AUTH_ENABLED"); v != "" {
 		cfg.Auth.Enabled = strings.EqualFold(v, "true") || v == "1"
 	}
+	if v := os.Getenv("OPENCORTEX_AGENTS_AUTO_DEACTIVATE_AFTER"); v != "" {
+		cfg.Agents.AutoDeactivateAfter = v
+	}
 	if v := os.Getenv("AGENTMESH_ADMIN_KEY"); v != "" {
 		cfg.Auth.AdminKey = v
 	}
@@ -217,6 +224,15 @@ func validate(cfg Config) error {
 	}
 	if cfg.Database.Path == "" {
 		return errors.New("database.path is required")
+	}
+	if v := strings.TrimSpace(cfg.Agents.AutoDeactivateAfter); v != "" &&
+		v != "0" &&
+		!strings.EqualFold(v, "off") &&
+		!strings.EqualFold(v, "disabled") {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return errors.New("agents.auto_deactivate_after must be a positive duration or 0/off")
+		}
 	}
 	if cfg.Broker.ChannelBufferSize <= 0 {
 		return errors.New("broker.channel_buffer_size must be > 0")

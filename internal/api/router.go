@@ -23,6 +23,7 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 		api.Get("/ws", hub.ServeWS)
 		api.Get("/admin/health", server.AdminHealth)
 		api.Get("/bootstrap/status", server.BootstrapStatus)
+		api.Post("/web/auth/local-admin", server.WebLocalAdminAuth)
 		// Auto-registration: localhost-only, no API key required.
 		// Loopback enforcement is done inside the handler.
 		api.Post("/agents/auto-register", server.AutoRegister)
@@ -105,6 +106,7 @@ func NewRouter(server *handlers.Server, app *service.App, hub *ws.Hub) http.Hand
 			protected.With(apimw.RequirePermission(app, "knowledge", "read")).Get("/skills/{id}/versions/{v}", server.SkillVersion)
 			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Post("/skills/{id}/pin", server.PinSkill)
 			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Delete("/skills/{id}/pin", server.UnpinSkill)
+			protected.With(apimw.RequirePermission(app, "knowledge", "write")).Post("/skills/{id}/install", server.InstallSkill)
 
 			// Collections
 			protected.With(apimw.RequirePermission(app, "collections", "write")).Post("/collections", server.CreateCollection)

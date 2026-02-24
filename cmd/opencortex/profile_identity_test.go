@@ -112,6 +112,12 @@ func TestAuthStoreGetTokenForProfilePrecedence(t *testing.T) {
 	if got, ok := authStoreGetTokenForProfile(base, "unknown"); !ok || got != "k-planner" {
 		t.Fatalf("expected planner fallback token, got %q ok=%v", got, ok)
 	}
+	if got, ok := authStoreGetTokenForProfileMode(base, "unknown", false); ok || got != "" {
+		t.Fatalf("expected strict profile lookup miss, got %q ok=%v", got, ok)
+	}
+	if got, ok := authStoreGetTokenForProfileMode(base, "review", false); !ok || got != "k-review" {
+		t.Fatalf("expected strict review token, got %q ok=%v", got, ok)
+	}
 
 	store.CurrentByBaseURL[base] = "missing"
 	if err := authStoreSave(store); err != nil {
@@ -119,6 +125,9 @@ func TestAuthStoreGetTokenForProfilePrecedence(t *testing.T) {
 	}
 	if got, ok := authStoreGetTokenForProfile(base, "unknown"); !ok || got != "k-default" {
 		t.Fatalf("expected default fallback token, got %q ok=%v", got, ok)
+	}
+	if got, ok := authStoreGetTokenForProfileMode(base, "unknown", false); ok || got != "" {
+		t.Fatalf("expected strict miss after current profile is missing, got %q ok=%v", got, ok)
 	}
 }
 

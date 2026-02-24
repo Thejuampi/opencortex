@@ -85,14 +85,18 @@ func resolveProfile(baseURL, flagProfile string) (string, string, error) {
 	return defaultAgentProfile, "default", nil
 }
 
+func isExplicitProfileSource(source string) bool {
+	return source == "flag" || source == "env"
+}
+
 func newAPIClient(baseURL, apiKey string) *apiClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
 	baseURL = canonicalBaseURL(baseURL)
 	if strings.TrimSpace(apiKey) == "" {
-		profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
-		if saved, ok := authStoreGetTokenForProfile(baseURL, profile); ok {
+		profile, source, _ := resolveProfile(baseURL, agentProfileFlag)
+		if saved, ok := authStoreGetTokenForProfileMode(baseURL, profile, !isExplicitProfileSource(source)); ok {
 			apiKey = saved
 		}
 	}
@@ -319,8 +323,8 @@ func localFingerprint(baseURL, profile string) string {
 // ensureLocalAuth returns a valid API key for baseURL.
 // If no key is saved and the server is local, it auto-registers.
 func ensureLocalAuth(baseURL string) string {
-	profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
-	if saved, ok := authStoreGetTokenForProfile(baseURL, profile); ok {
+	profile, source, _ := resolveProfile(baseURL, agentProfileFlag)
+	if saved, ok := authStoreGetTokenForProfileMode(baseURL, profile, !isExplicitProfileSource(source)); ok {
 		return saved
 	}
 	// Only auto-register for localhost URLs.
@@ -1369,9 +1373,8 @@ When --api-key is omitted, CLI commands use the saved account for --base-url and
   opencortex auth logout --base-url http://localhost:8080`),
 	}
 
-	resolveCmdProfile := func(base string) (string, error) {
-		profile, _, err := resolveProfile(base, *agentProfile)
-		return profile, err
+	resolveCmdProfile := func(base string) (string, string, error) {
+		return resolveProfile(base, *agentProfile)
 	}
 
 	var withToken bool
@@ -1402,7 +1405,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url and
 			if err := client.do(http.MethodGet, "/api/v1/agents/me", nil, &out); err != nil {
 				return fmt.Errorf("login failed: %w", err)
 			}
-			profile, err := resolveCmdProfile(client.baseURL)
+			profile, _, err := resolveCmdProfile(client.baseURL)
 			if err != nil {
 				return err
 			}
@@ -1532,7 +1535,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url and
 		Short: "Switch active saved account to --base-url and profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			base := canonicalBaseURL(*baseURL)
-			profile, err := resolveCmdProfile(base)
+			profile, _, err := resolveCmdProfile(base)
 			if err != nil {
 				return err
 			}
@@ -1573,7 +1576,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url and
 				return nil
 			}
 			base := canonicalBaseURL(*baseURL)
-			profile, err := resolveCmdProfile(base)
+			profile, _, err := resolveCmdProfile(base)
 			if err != nil {
 				return err
 			}
@@ -1602,14 +1605,11 @@ When --api-key is omitted, CLI commands use the saved account for --base-url and
 		Short: "Print stored token for --base-url (or current account)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			base := canonicalBaseURL(*baseURL)
-			profile, err := resolveCmdProfile(base)
+			profile, source, err := resolveCmdProfile(base)
 			if err != nil {
 				return err
 			}
-			token, ok := authStoreGetTokenForProfile(base, profile)
-			if !ok && base == canonicalBaseURL("http://localhost:8080") {
-				token, ok = authStoreGetToken(base)
-			}
+			token, ok := authStoreGetTokenForProfileMode(base, profile, !isExplicitProfileSource(source))
 			if !ok {
 				return errors.New("no saved token; run 'opencortex auth login'")
 			}
@@ -2542,7 +2542,7 @@ func authStoreUpsert(baseURL, key string, agent any, roles []string) error {
 	return authStoreUpsertWithProfile(baseURL, profile, key, agent, roles)
 }
 
-func authStoreGetTokenForProfile(baseURL, profile string) (string, bool) {
+func authStoreGetTokenForProfileMode(baseURL, profile string, allowFallback bool) (string, bool) {
 	store, err := authStoreLoad()
 	if err != nil {
 		return "", false
@@ -2556,6 +2556,9 @@ func authStoreGetTokenForProfile(baseURL, profile string) (string, bool) {
 		if acc, ok := store.Accounts[authAccountKey(baseURL, profile)]; ok && strings.TrimSpace(acc.APIKey) != "" {
 			return acc.APIKey, true
 		}
+		if !allowFallback {
+			return "", false
+		}
 		if p, ok := store.CurrentByBaseURL[baseURL]; ok {
 			if acc, ok := store.Accounts[authAccountKey(baseURL, p)]; ok && strings.TrimSpace(acc.APIKey) != "" {
 				return acc.APIKey, true
@@ -2568,9 +2571,13 @@ func authStoreGetTokenForProfile(baseURL, profile string) (string, bool) {
 	return "", false
 }
 
+func authStoreGetTokenForProfile(baseURL, profile string) (string, bool) {
+	return authStoreGetTokenForProfileMode(baseURL, profile, true)
+}
+
 func authStoreGetToken(baseURL string) (string, bool) {
-	profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
-	return authStoreGetTokenForProfile(baseURL, profile)
+	profile, source, _ := resolveProfile(baseURL, agentProfileFlag)
+	return authStoreGetTokenForProfileMode(baseURL, profile, !isExplicitProfileSource(source))
 }
 
 const (

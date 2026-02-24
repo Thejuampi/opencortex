@@ -226,6 +226,24 @@ func TestSkillsSpecialKnowledgeLifecycle(t *testing.T) {
 	if len(listEnv.Data.Skills) != 1 || listEnv.Data.Skills[0].ID != skillID {
 		t.Fatalf("expected exactly one skill in list, got %+v", listEnv.Data.Skills)
 	}
+	searchResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills?q=openapi-skill", adminKey, nil)
+	defer searchResp.Body.Close()
+	if searchResp.StatusCode != http.StatusOK {
+		t.Fatalf("search skills status with hyphenated slug: %d", searchResp.StatusCode)
+	}
+	var searchEnv struct {
+		Data struct {
+			Skills []struct {
+				ID string `json:"id"`
+			} `json:"skills"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(searchResp.Body).Decode(&searchEnv); err != nil {
+		t.Fatalf("decode search skills: %v", err)
+	}
+	if len(searchEnv.Data.Skills) == 0 || searchEnv.Data.Skills[0].ID != skillID {
+		t.Fatalf("expected slug query to return created skill, got %+v", searchEnv.Data.Skills)
+	}
 
 	plainGet := doJSON(t, http.MethodGet, ts.URL+"/api/v1/skills/"+plainKnowledgeID, adminKey, nil)
 	defer plainGet.Body.Close()
@@ -318,6 +336,72 @@ func TestSkillsSpecialKnowledgeLifecycle(t *testing.T) {
 	}
 	if unpinEnv.Data.Skill.IsPinned {
 		t.Fatalf("expected skill to be unpinned")
+	}
+}
+
+func TestWebLocalAdminAuthZeroCeremony(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Default()
+	cfg.Database.Path = filepath.Join(tmp, "web-local-auth.db")
+	cfg.Auth.Enabled = true
+
+	ctx := context.Background()
+	db, err := storage.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	store := repos.New(db)
+	mem := broker.NewMemory(64)
+	app := service.New(cfg, store, mem)
+	_, _, err = app.BootstrapInit(ctx, "admin")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	syncEngine := syncer.NewEngine(db, store)
+	handler := handlers.New(app, db, cfg, syncEngine)
+	hub := ws.NewHub(app, store)
+	router := api.NewRouter(handler, app, hub)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	webAuthResp := doJSON(t, http.MethodPost, ts.URL+"/api/v1/web/auth/local-admin", "", map[string]any{})
+	defer webAuthResp.Body.Close()
+	if webAuthResp.StatusCode != http.StatusOK {
+		t.Fatalf("web local auth status: %d", webAuthResp.StatusCode)
+	}
+	var webAuthEnv struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			APIKey string   `json:"api_key"`
+			Roles  []string `json:"roles"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(webAuthResp.Body).Decode(&webAuthEnv); err != nil {
+		t.Fatalf("decode web auth: %v", err)
+	}
+	if !webAuthEnv.OK || webAuthEnv.Data.APIKey == "" {
+		t.Fatalf("expected api key in web auth response")
+	}
+	foundAdmin := false
+	for _, role := range webAuthEnv.Data.Roles {
+		if role == "admin" {
+			foundAdmin = true
+			break
+		}
+	}
+	if !foundAdmin {
+		t.Fatalf("expected admin role in web auth response, got %v", webAuthEnv.Data.Roles)
+	}
+
+	statsResp := doJSON(t, http.MethodGet, ts.URL+"/api/v1/admin/stats", webAuthEnv.Data.APIKey, nil)
+	defer statsResp.Body.Close()
+	if statsResp.StatusCode != http.StatusOK {
+		t.Fatalf("admin stats with web local key status: %d", statsResp.StatusCode)
 	}
 }
 

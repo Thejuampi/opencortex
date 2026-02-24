@@ -60,9 +60,13 @@ func New(cfg config.Config, store *repos.Store, broker broker.Broker) *App {
 func (a *App) sweepLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	agentTTL := parseAutoDeactivateAfter(a.Config.Agents.AutoDeactivateAfter)
 	for {
 		<-ticker.C
 		_, _, _ = a.Store.SweepDeliveries(context.Background())
+		if agentTTL > 0 {
+			_, _ = a.Store.DeleteInactiveAutoAgentsCascade(context.Background(), nowUTC().Add(-agentTTL))
+		}
 	}
 }
 
@@ -218,6 +222,14 @@ func (a *App) AutoRegisterLocal(ctx context.Context, name, fingerprint string) (
 	if fingerprint != "" {
 		existing, err := a.Store.GetAgentByFingerprint(ctx, fingerprint)
 		if err == nil {
+			if existing.Status != model.AgentStatusActive {
+				active := string(model.AgentStatusActive)
+				updated, updateErr := a.Store.UpdateAgent(ctx, existing.ID, nil, nil, nil, &active)
+				if updateErr != nil {
+					return model.Agent{}, "", updateErr
+				}
+				existing = updated
+			}
 			// Rotate key so the caller has a fresh session token.
 			raw, rotateErr := a.RotateAgentKey(ctx, existing.ID, "live")
 			if rotateErr != nil {
@@ -253,6 +265,18 @@ func (a *App) AutoRegisterLocal(ctx context.Context, name, fingerprint string) (
 	}
 
 	return model.Agent{}, "", fmt.Errorf("%w: could not allocate unique auto-register name", ErrConflict)
+}
+
+func parseAutoDeactivateAfter(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "0" || strings.EqualFold(raw, "off") || strings.EqualFold(raw, "disabled") {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }
 
 func (a *App) CreateTopic(ctx context.Context, in repos.CreateTopicInput) (model.Topic, error) {

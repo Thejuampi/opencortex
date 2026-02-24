@@ -83,3 +83,29 @@ func TestAutoRegisterLocalReusesFingerprintIdentity(t *testing.T) {
 		t.Fatal("expected rotated api key on re-register")
 	}
 }
+
+func TestAutoRegisterLocalReactivatesInactiveFingerprintAgent(t *testing.T) {
+	app := setupServiceTestApp(t)
+	ctx := context.Background()
+
+	a1, _, err := app.AutoRegisterLocal(ctx, "agent-a", "same-fp")
+	if err != nil {
+		t.Fatalf("first auto-register: %v", err)
+	}
+
+	inactive := "inactive"
+	if _, err := app.Store.UpdateAgent(ctx, a1.ID, nil, nil, nil, &inactive); err != nil {
+		t.Fatalf("set inactive: %v", err)
+	}
+
+	a2, _, err := app.AutoRegisterLocal(ctx, "agent-a", "same-fp")
+	if err != nil {
+		t.Fatalf("second auto-register: %v", err)
+	}
+	if a2.ID != a1.ID {
+		t.Fatalf("expected same agent id, got %s vs %s", a2.ID, a1.ID)
+	}
+	if a2.Status != "active" {
+		t.Fatalf("expected reactivated status active, got %s", a2.Status)
+	}
+}
