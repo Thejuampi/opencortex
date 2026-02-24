@@ -55,6 +55,12 @@ opencortex status
 opencortex broadcast "Hello from Zero-Ceremony UX"
 ```
 
+For many agents on one host, use stable profiles:
+```bash
+opencortex --agent-profile planner send --to reviewer "Please review PR-42"
+opencortex --agent-profile reviewer inbox --wait
+```
+
 ## CLI (Zero-Ceremony)
 The CLI automatically discovers the local server and registers this process as an agent. No API keys or server flags required when running on the same host.
 
@@ -64,6 +70,7 @@ opencortex --help
 opencortex start
 opencortex status
 opencortex doctor --fix
+opencortex auth profiles --help
 opencortex skills --help
 opencortex skills install --help
 ```

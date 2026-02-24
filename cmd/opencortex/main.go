@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,13 +50,49 @@ type apiClient struct {
 	client  *http.Client
 }
 
+const defaultAgentProfile = "default"
+
+var (
+	agentProfileFlag    string
+	profileNamePattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	errInvalidProfileID = errors.New("invalid agent profile")
+)
+
+func normalizeProfileName(raw string) (string, error) {
+	p := strings.ToLower(strings.TrimSpace(raw))
+	if p == "" {
+		return defaultAgentProfile, nil
+	}
+	if !profileNamePattern.MatchString(p) {
+		return "", fmt.Errorf("%w: %q (allowed: [a-z0-9][a-z0-9._-]{0,63})", errInvalidProfileID, raw)
+	}
+	return p, nil
+}
+
+func resolveProfile(baseURL, flagProfile string) (string, string, error) {
+	if p := strings.TrimSpace(flagProfile); p != "" {
+		n, err := normalizeProfileName(p)
+		return n, "flag", err
+	}
+	if p := strings.TrimSpace(os.Getenv("OPENCORTEX_AGENT_PROFILE")); p != "" {
+		n, err := normalizeProfileName(p)
+		return n, "env", err
+	}
+	if p, ok := authStoreCurrentProfile(baseURL); ok {
+		n, err := normalizeProfileName(p)
+		return n, "store", err
+	}
+	return defaultAgentProfile, "default", nil
+}
+
 func newAPIClient(baseURL, apiKey string) *apiClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
 	}
 	baseURL = canonicalBaseURL(baseURL)
 	if strings.TrimSpace(apiKey) == "" {
-		if saved, ok := authStoreGetToken(baseURL); ok {
+		profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
+		if saved, ok := authStoreGetTokenForProfile(baseURL, profile); ok {
 			apiKey = saved
 		}
 	}
@@ -110,10 +147,11 @@ func (c *apiClient) do(method, path string, body any, out any) error {
 
 func main() {
 	var (
-		cfgPath string
-		baseURL string
-		apiKey  string
-		asJSON  bool
+		cfgPath      string
+		baseURL      string
+		apiKey       string
+		asJSON       bool
+		agentProfile string
 	)
 
 	root := &cobra.Command{
@@ -133,14 +171,20 @@ func main() {
 	root.PersistentFlags().StringVar(&cfgPath, "config", bootstrap.ManagedConfigPath(), "Path to config file")
 	root.PersistentFlags().StringVar(&baseURL, "base-url", discoverServerURL(), "Base API URL for CLI commands")
 	root.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for CLI commands (optional on localhost)")
+	root.PersistentFlags().StringVar(&agentProfile, "agent-profile", "", "Agent profile identity for multi-agent local usage")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON output")
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		agentProfileFlag = agentProfile
+		_, _, err := resolveProfile(baseURL, agentProfileFlag)
+		return err
+	}
 
 	root.AddCommand(newInitCommand(&cfgPath))
 	root.AddCommand(newServerCommand(&cfgPath))
 	root.AddCommand(newMCPServerCommand(&cfgPath))
 	root.AddCommand(newMCPCommand(&cfgPath)) // 'mcp' alias, no --api-key needed
 	root.AddCommand(newConfigCommand(&cfgPath))
-	root.AddCommand(newAuthCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newAuthCommand(&baseURL, &apiKey, &agentProfile, &asJSON))
 	root.AddCommand(newStartCommand(&cfgPath, &asJSON))
 	root.AddCommand(newStopCommand(&asJSON))
 	root.AddCommand(newStatusCommand(&cfgPath, &asJSON))
@@ -259,29 +303,33 @@ func isProcessAlive(pid int) bool {
 }
 
 // localFingerprint builds a stable agent identity for the current CLI process.
-// hash(hostname + exe-name) — intentionally excludes PID so the same machine+binary
-// always maps to the same agent record.
-func localFingerprint() string {
+// hash(hostname + exe-name + base-url + profile), intentionally excluding PID/session.
+func localFingerprint(baseURL, profile string) string {
 	hostname, _ := os.Hostname()
 	exe, _ := os.Executable()
 	exe = filepath.Base(exe)
-	h := sha256.Sum256([]byte(hostname + ":" + exe))
+	baseURL = canonicalBaseURL(baseURL)
+	if profile == "" {
+		profile = defaultAgentProfile
+	}
+	h := sha256.Sum256([]byte(hostname + ":" + exe + ":" + baseURL + ":" + profile))
 	return "cli-" + hex.EncodeToString(h[:8])
 }
 
 // ensureLocalAuth returns a valid API key for baseURL.
 // If no key is saved and the server is local, it auto-registers.
 func ensureLocalAuth(baseURL string) string {
-	if saved, ok := authStoreGetToken(baseURL); ok {
+	profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
+	if saved, ok := authStoreGetTokenForProfile(baseURL, profile); ok {
 		return saved
 	}
 	// Only auto-register for localhost URLs.
 	if !isLocalURL(baseURL) {
 		return ""
 	}
-	fp := localFingerprint()
+	fp := localFingerprint(baseURL, profile)
 	hostname, _ := os.Hostname()
-	agentName := "cli@" + hostname
+	agentName := "cli@" + hostname + ":" + profile
 
 	body, err := json.Marshal(map[string]string{
 		"name":        agentName,
@@ -313,7 +361,7 @@ func ensureLocalAuth(baseURL string) string {
 	if key == "" {
 		return ""
 	}
-	_ = authStoreUpsert(baseURL, key, map[string]any{
+	_ = authStoreUpsertWithProfile(baseURL, profile, key, map[string]any{
 		"id":   out.Data.Agent.ID,
 		"name": out.Data.Agent.Name,
 	}, []string{"agent"})
@@ -793,8 +841,9 @@ MCP config (minimal):
 			// Auto-register via the service layer directly (we are in-process).
 			serverURL := discoverServerURL()
 			hostname, _ := os.Hostname()
-			fp := localFingerprint()
-			agentName := "mcp@" + hostname
+			profile, _, _ := resolveProfile(serverURL, agentProfileFlag)
+			fp := localFingerprint(serverURL, profile)
+			agentName := "mcp@" + hostname + ":" + profile
 			_, effectiveKey, autoErr := app.AutoRegisterLocal(ctx, agentName, fp)
 			if autoErr != nil {
 				// Fall back to configured key.
@@ -804,7 +853,7 @@ MCP config (minimal):
 				return errors.New("could not obtain API key; set auth.admin_key in config or start the server first")
 			}
 			// Persist for future CLI calls.
-			_ = authStoreUpsert(serverURL, effectiveKey, map[string]any{
+			_ = authStoreUpsertWithProfile(serverURL, profile, effectiveKey, map[string]any{
 				"name": agentName,
 			}, []string{"agent"})
 
@@ -1298,25 +1347,31 @@ Environment overrides:
 	return cmd
 }
 
-func newAuthCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newAuthCommand(baseURL, apiKey, agentProfile *string, asJSON *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate CLI and persist credentials",
 		Long: strings.TrimSpace(`
 Persistent auth works similarly to gh:
-  - login stores credentials for a host/base URL
+  - login stores credentials for a host/base URL + profile
   - status shows saved accounts and current selection
   - whoami validates current credentials against /api/v1/agents/me
-  - switch changes the active saved account
+  - switch changes the active saved account profile
   - logout removes one or all saved accounts
 
-When --api-key is omitted, CLI commands use the saved account for --base-url.`),
+When --api-key is omitted, CLI commands use the saved account for --base-url and --agent-profile.`),
 		Example: strings.TrimSpace(`
   opencortex auth login --base-url http://localhost:8080 --api-key amk_live_xxx
+  opencortex auth profiles use planner
   opencortex auth status
   opencortex auth whoami
-  opencortex auth switch --base-url https://hub.example.com
+  opencortex auth switch --base-url https://hub.example.com --agent-profile planner
   opencortex auth logout --base-url http://localhost:8080`),
+	}
+
+	resolveCmdProfile := func(base string) (string, error) {
+		profile, _, err := resolveProfile(base, *agentProfile)
+		return profile, err
 	}
 
 	var withToken bool
@@ -1347,13 +1402,18 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 			if err := client.do(http.MethodGet, "/api/v1/agents/me", nil, &out); err != nil {
 				return fmt.Errorf("login failed: %w", err)
 			}
-			if err := authStoreUpsert(client.baseURL, key, out.Agent, out.Roles); err != nil {
+			profile, err := resolveCmdProfile(client.baseURL)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("logged in to %s\n", client.baseURL)
+			if err := authStoreUpsertWithProfile(client.baseURL, profile, key, out.Agent, out.Roles); err != nil {
+				return err
+			}
+			fmt.Printf("logged in to %s (profile: %s)\n", client.baseURL, profile)
 			if *asJSON {
 				return printJSON(map[string]any{
 					"base_url": client.baseURL,
+					"profile":  profile,
 					"agent":    out.Agent,
 					"roles":    out.Roles,
 				})
@@ -1376,6 +1436,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 			if *asJSON {
 				type entry struct {
 					BaseURL   string    `json:"base_url"`
+					Profile   string    `json:"profile"`
 					AgentID   string    `json:"agent_id,omitempty"`
 					AgentName string    `json:"agent_name,omitempty"`
 					Roles     []string  `json:"roles,omitempty"`
@@ -1384,39 +1445,60 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 					IsCurrent bool      `json:"is_current"`
 				}
 				out := make([]entry, 0, len(store.Accounts))
-				for k, v := range store.Accounts {
+				base := canonicalBaseURL(*baseURL)
+				activeProfile, _ := authStoreCurrentProfile(base)
+				for _, v := range store.Accounts {
+					if base != "" && v.BaseURL != base {
+						continue
+					}
 					out = append(out, entry{
-						BaseURL:   k,
+						BaseURL:   v.BaseURL,
+						Profile:   v.Profile,
 						AgentID:   v.AgentID,
 						AgentName: v.AgentName,
 						Roles:     v.Roles,
 						UpdatedAt: v.UpdatedAt,
 						HasToken:  strings.TrimSpace(v.APIKey) != "",
-						IsCurrent: store.Current == k,
+						IsCurrent: v.BaseURL == base && v.Profile == activeProfile,
 					})
 				}
-				sort.Slice(out, func(i, j int) bool { return out[i].BaseURL < out[j].BaseURL })
+				sort.Slice(out, func(i, j int) bool {
+					if out[i].BaseURL == out[j].BaseURL {
+						return out[i].Profile < out[j].Profile
+					}
+					return out[i].BaseURL < out[j].BaseURL
+				})
 				return printJSON(map[string]any{
-					"current":  store.Current,
-					"accounts": out,
+					"current_base_url": base,
+					"current_profile":  activeProfile,
+					"accounts":         out,
 				})
 			}
 			if len(store.Accounts) == 0 {
 				fmt.Println("no saved auth accounts")
 				return nil
 			}
-			keys := make([]string, 0, len(store.Accounts))
-			for k := range store.Accounts {
-				keys = append(keys, k)
+			type item struct {
+				Key string
+				Acc authAccount
 			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				a := store.Accounts[k]
+			items := make([]item, 0, len(store.Accounts))
+			for k, a := range store.Accounts {
+				items = append(items, item{Key: k, Acc: a})
+			}
+			sort.Slice(items, func(i, j int) bool { return items[i].Key < items[j].Key })
+			base := canonicalBaseURL(*baseURL)
+			currentProfile, _ := authStoreCurrentProfile(base)
+			for _, it := range items {
+				a := it.Acc
+				if base != "" && a.BaseURL != base {
+					continue
+				}
 				active := " "
-				if store.Current == k {
+				if a.BaseURL == base && a.Profile == currentProfile {
 					active = "*"
 				}
-				fmt.Printf("%s %s", active, k)
+				fmt.Printf("%s %s#%s", active, a.BaseURL, a.Profile)
 				if a.AgentName != "" {
 					fmt.Printf("  (%s)", a.AgentName)
 				}
@@ -1447,21 +1529,25 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 
 	switchCmd := &cobra.Command{
 		Use:   "switch",
-		Short: "Switch active saved account to --base-url",
+		Short: "Switch active saved account to --base-url and profile",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			base := canonicalBaseURL(*baseURL)
+			profile, err := resolveCmdProfile(base)
+			if err != nil {
+				return err
+			}
 			store, err := authStoreLoad()
 			if err != nil {
 				return err
 			}
-			if _, ok := store.Accounts[base]; !ok {
-				return fmt.Errorf("no saved account for %s", base)
+			key := authAccountKey(base, profile)
+			if _, ok := store.Accounts[key]; !ok {
+				return fmt.Errorf("no saved account for %s profile %s", base, profile)
 			}
-			store.Current = base
-			if err := authStoreSave(store); err != nil {
+			if err := authStoreSetCurrentProfile(base, profile); err != nil {
 				return err
 			}
-			fmt.Printf("active account: %s\n", base)
+			fmt.Printf("active account: %s (profile: %s)\n", base, profile)
 			return nil
 		},
 	}
@@ -1479,6 +1565,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 			if logoutAll {
 				store.Accounts = map[string]authAccount{}
 				store.Current = ""
+				store.CurrentByBaseURL = map[string]string{}
 				if err := authStoreSave(store); err != nil {
 					return err
 				}
@@ -1486,20 +1573,24 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 				return nil
 			}
 			base := canonicalBaseURL(*baseURL)
-			delete(store.Accounts, base)
-			if store.Current == base {
-				store.Current = ""
+			profile, err := resolveCmdProfile(base)
+			if err != nil {
+				return err
 			}
-			if store.Current == "" && len(store.Accounts) > 0 {
-				for k := range store.Accounts {
-					store.Current = k
-					break
+			delete(store.Accounts, authAccountKey(base, profile))
+			if cur, ok := store.CurrentByBaseURL[base]; ok && cur == profile {
+				delete(store.CurrentByBaseURL, base)
+				for _, acc := range store.Accounts {
+					if acc.BaseURL == base {
+						store.CurrentByBaseURL[base] = acc.Profile
+						break
+					}
 				}
 			}
 			if err := authStoreSave(store); err != nil {
 				return err
 			}
-			fmt.Printf("logged out from %s\n", base)
+			fmt.Printf("logged out from %s (profile: %s)\n", base, profile)
 			return nil
 		},
 	}
@@ -1511,9 +1602,13 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 		Short: "Print stored token for --base-url (or current account)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			base := canonicalBaseURL(*baseURL)
-			token, ok := authStoreGetToken(base)
+			profile, err := resolveCmdProfile(base)
+			if err != nil {
+				return err
+			}
+			token, ok := authStoreGetTokenForProfile(base, profile)
 			if !ok && base == canonicalBaseURL("http://localhost:8080") {
-				token, ok = authStoreGetToken("")
+				token, ok = authStoreGetToken(base)
 			}
 			if !ok {
 				return errors.New("no saved token; run 'opencortex auth login'")
@@ -1522,6 +1617,179 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 			return nil
 		},
 	})
+
+	var forceDeleteProfile bool
+	profiles := &cobra.Command{
+		Use:   "profiles",
+		Short: "Manage persisted agent profiles for auth identity",
+	}
+	profiles.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List profiles for --base-url",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := canonicalBaseURL(*baseURL)
+			store, err := authStoreLoad()
+			if err != nil {
+				return err
+			}
+			seen := map[string]struct{}{}
+			out := []string{}
+			for _, acc := range store.Accounts {
+				if acc.BaseURL != base {
+					continue
+				}
+				if _, ok := seen[acc.Profile]; ok {
+					continue
+				}
+				seen[acc.Profile] = struct{}{}
+				out = append(out, acc.Profile)
+			}
+			if _, ok := seen[defaultAgentProfile]; !ok {
+				out = append(out, defaultAgentProfile)
+			}
+			sort.Strings(out)
+			current, _ := authStoreCurrentProfile(base)
+			if *asJSON {
+				return printJSON(map[string]any{"base_url": base, "current_profile": current, "profiles": out})
+			}
+			for _, p := range out {
+				marker := " "
+				if p == current {
+					marker = "*"
+				}
+				fmt.Printf("%s %s\n", marker, p)
+			}
+			return nil
+		},
+	})
+	profiles.AddCommand(&cobra.Command{
+		Use:   "use <name>",
+		Short: "Set current profile for --base-url",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := canonicalBaseURL(*baseURL)
+			p, err := normalizeProfileName(args[0])
+			if err != nil {
+				return err
+			}
+			if err := authStoreSetCurrentProfile(base, p); err != nil {
+				return err
+			}
+			fmt.Printf("active profile for %s: %s\n", base, p)
+			return nil
+		},
+	})
+	profiles.AddCommand(&cobra.Command{
+		Use:   "show [name]",
+		Short: "Show account metadata for a profile on --base-url",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := canonicalBaseURL(*baseURL)
+			p, _ := authStoreCurrentProfile(base)
+			if len(args) == 1 {
+				var err error
+				p, err = normalizeProfileName(args[0])
+				if err != nil {
+					return err
+				}
+			}
+			store, err := authStoreLoad()
+			if err != nil {
+				return err
+			}
+			acc, ok := store.Accounts[authAccountKey(base, p)]
+			if !ok {
+				if *asJSON {
+					return printJSON(map[string]any{"base_url": base, "profile": p, "exists": false})
+				}
+				fmt.Printf("profile %s has no saved account for %s\n", p, base)
+				return nil
+			}
+			return printJSON(map[string]any{"base_url": base, "profile": p, "account": acc})
+		},
+	})
+	profiles.AddCommand(&cobra.Command{
+		Use:   "rename <old> <new>",
+		Short: "Rename profile for --base-url",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := canonicalBaseURL(*baseURL)
+			oldP, err := normalizeProfileName(args[0])
+			if err != nil {
+				return err
+			}
+			newP, err := normalizeProfileName(args[1])
+			if err != nil {
+				return err
+			}
+			store, err := authStoreLoad()
+			if err != nil {
+				return err
+			}
+			oldKey := authAccountKey(base, oldP)
+			acc, ok := store.Accounts[oldKey]
+			if !ok {
+				return fmt.Errorf("profile %s not found for %s", oldP, base)
+			}
+			newKey := authAccountKey(base, newP)
+			if _, exists := store.Accounts[newKey]; exists {
+				return fmt.Errorf("profile %s already exists for %s", newP, base)
+			}
+			delete(store.Accounts, oldKey)
+			acc.Profile = newP
+			store.Accounts[newKey] = acc
+			if cur, ok := store.CurrentByBaseURL[base]; ok && cur == oldP {
+				store.CurrentByBaseURL[base] = newP
+			}
+			if err := authStoreSave(store); err != nil {
+				return err
+			}
+			fmt.Printf("renamed profile %s -> %s for %s\n", oldP, newP, base)
+			return nil
+		},
+	})
+	deleteCmd := &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete profile account for --base-url",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := canonicalBaseURL(*baseURL)
+			p, err := normalizeProfileName(args[0])
+			if err != nil {
+				return err
+			}
+			store, err := authStoreLoad()
+			if err != nil {
+				return err
+			}
+			key := authAccountKey(base, p)
+			if _, ok := store.Accounts[key]; !ok {
+				return fmt.Errorf("profile %s not found for %s", p, base)
+			}
+			cur, _ := authStoreCurrentProfile(base)
+			if cur == p && !forceDeleteProfile {
+				return fmt.Errorf("profile %s is active; use --force or switch profile first", p)
+			}
+			delete(store.Accounts, key)
+			if cur == p {
+				delete(store.CurrentByBaseURL, base)
+				for _, acc := range store.Accounts {
+					if acc.BaseURL == base {
+						store.CurrentByBaseURL[base] = acc.Profile
+						break
+					}
+				}
+			}
+			if err := authStoreSave(store); err != nil {
+				return err
+			}
+			fmt.Printf("deleted profile %s for %s\n", p, base)
+			return nil
+		},
+	}
+	deleteCmd.Flags().BoolVar(&forceDeleteProfile, "force", false, "Allow deleting current active profile")
+	profiles.AddCommand(deleteCmd)
+	cmd.AddCommand(profiles)
 
 	return cmd
 }
@@ -2057,6 +2325,7 @@ func valuePtr(v string) *string {
 
 type authAccount struct {
 	BaseURL   string    `json:"base_url"`
+	Profile   string    `json:"profile,omitempty"`
 	APIKey    string    `json:"api_key"`
 	AgentID   string    `json:"agent_id,omitempty"`
 	AgentName string    `json:"agent_name,omitempty"`
@@ -2065,8 +2334,9 @@ type authAccount struct {
 }
 
 type authStore struct {
-	Current  string                 `json:"current"`
-	Accounts map[string]authAccount `json:"accounts"`
+	Current          string                 `json:"current"`
+	CurrentByBaseURL map[string]string      `json:"current_by_base_url,omitempty"`
+	Accounts         map[string]authAccount `json:"accounts"`
 }
 
 func canonicalBaseURL(raw string) string {
@@ -2109,7 +2379,10 @@ func authStoreLoad() (authStore, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return authStore{Accounts: map[string]authAccount{}}, nil
+			return authStore{
+				CurrentByBaseURL: map[string]string{},
+				Accounts:         map[string]authAccount{},
+			}, nil
 		}
 		return authStore{}, err
 	}
@@ -2119,6 +2392,52 @@ func authStoreLoad() (authStore, error) {
 	}
 	if s.Accounts == nil {
 		s.Accounts = map[string]authAccount{}
+	}
+	if s.CurrentByBaseURL == nil {
+		s.CurrentByBaseURL = map[string]string{}
+	}
+	// Lazy migration: legacy accounts keyed by base_url migrate to base_url#default.
+	migrated := map[string]authAccount{}
+	for k, acc := range s.Accounts {
+		if strings.Contains(k, "#") {
+			if acc.Profile == "" {
+				parts := strings.SplitN(k, "#", 2)
+				acc.Profile = parts[1]
+			}
+			if acc.BaseURL == "" {
+				parts := strings.SplitN(k, "#", 2)
+				acc.BaseURL = canonicalBaseURL(parts[0])
+			}
+			migrated[k] = acc
+			continue
+		}
+		base := canonicalBaseURL(k)
+		if base == "" {
+			base = canonicalBaseURL(acc.BaseURL)
+		}
+		if base == "" {
+			continue
+		}
+		if acc.BaseURL == "" {
+			acc.BaseURL = base
+		}
+		if acc.Profile == "" {
+			acc.Profile = defaultAgentProfile
+		}
+		migrated[authAccountKey(base, acc.Profile)] = acc
+		if _, ok := s.CurrentByBaseURL[base]; !ok {
+			s.CurrentByBaseURL[base] = acc.Profile
+		}
+	}
+	s.Accounts = migrated
+	// Legacy current used to be base URL.
+	if s.Current != "" {
+		base := canonicalBaseURL(s.Current)
+		if base != "" {
+			if _, ok := s.CurrentByBaseURL[base]; !ok {
+				s.CurrentByBaseURL[base] = defaultAgentProfile
+			}
+		}
 	}
 	return s, nil
 }
@@ -2131,6 +2450,9 @@ func authStoreSave(store authStore) error {
 	if store.Accounts == nil {
 		store.Accounts = map[string]authAccount{}
 	}
+	if store.CurrentByBaseURL == nil {
+		store.CurrentByBaseURL = map[string]string{}
+	}
 	b, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return err
@@ -2138,8 +2460,53 @@ func authStoreSave(store authStore) error {
 	return os.WriteFile(path, b, 0o600)
 }
 
-func authStoreUpsert(baseURL, key string, agent any, roles []string) error {
+func authAccountKey(baseURL, profile string) string {
 	baseURL = canonicalBaseURL(baseURL)
+	if profile == "" {
+		profile = defaultAgentProfile
+	}
+	return baseURL + "#" + profile
+}
+
+func authStoreCurrentProfile(baseURL string) (string, bool) {
+	store, err := authStoreLoad()
+	if err != nil {
+		return "", false
+	}
+	baseURL = canonicalBaseURL(baseURL)
+	if baseURL == "" {
+		baseURL = canonicalBaseURL("http://localhost:8080")
+	}
+	if p, ok := store.CurrentByBaseURL[baseURL]; ok && strings.TrimSpace(p) != "" {
+		return p, true
+	}
+	return defaultAgentProfile, false
+}
+
+func authStoreSetCurrentProfile(baseURL, profile string) error {
+	baseURL = canonicalBaseURL(baseURL)
+	profile, err := normalizeProfileName(profile)
+	if err != nil {
+		return err
+	}
+	store, err := authStoreLoad()
+	if err != nil {
+		return err
+	}
+	if store.CurrentByBaseURL == nil {
+		store.CurrentByBaseURL = map[string]string{}
+	}
+	store.CurrentByBaseURL[baseURL] = profile
+	store.Current = baseURL
+	return authStoreSave(store)
+}
+
+func authStoreUpsertWithProfile(baseURL, profile, key string, agent any, roles []string) error {
+	baseURL = canonicalBaseURL(baseURL)
+	profile, err := normalizeProfileName(profile)
+	if err != nil {
+		return err
+	}
 	store, err := authStoreLoad()
 	if err != nil {
 		return err
@@ -2147,6 +2514,7 @@ func authStoreUpsert(baseURL, key string, agent any, roles []string) error {
 
 	acc := authAccount{
 		BaseURL:   baseURL,
+		Profile:   profile,
 		APIKey:    key,
 		Roles:     roles,
 		UpdatedAt: time.Now().UTC(),
@@ -2160,31 +2528,49 @@ func authStoreUpsert(baseURL, key string, agent any, roles []string) error {
 		}
 	}
 
-	store.Accounts[baseURL] = acc
+	store.Accounts[authAccountKey(baseURL, profile)] = acc
+	if store.CurrentByBaseURL == nil {
+		store.CurrentByBaseURL = map[string]string{}
+	}
+	store.CurrentByBaseURL[baseURL] = profile
 	store.Current = baseURL
 	return authStoreSave(store)
 }
 
-func authStoreGetToken(baseURL string) (string, bool) {
+func authStoreUpsert(baseURL, key string, agent any, roles []string) error {
+	profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
+	return authStoreUpsertWithProfile(baseURL, profile, key, agent, roles)
+}
+
+func authStoreGetTokenForProfile(baseURL, profile string) (string, bool) {
 	store, err := authStoreLoad()
 	if err != nil {
 		return "", false
 	}
 	baseURL = canonicalBaseURL(baseURL)
-	if baseURL == "" && store.Current != "" {
-		baseURL = store.Current
+	profile, err = normalizeProfileName(profile)
+	if err != nil {
+		return "", false
 	}
 	if baseURL != "" {
-		if acc, ok := store.Accounts[baseURL]; ok && strings.TrimSpace(acc.APIKey) != "" {
+		if acc, ok := store.Accounts[authAccountKey(baseURL, profile)]; ok && strings.TrimSpace(acc.APIKey) != "" {
 			return acc.APIKey, true
 		}
-	}
-	if store.Current != "" {
-		if acc, ok := store.Accounts[store.Current]; ok && strings.TrimSpace(acc.APIKey) != "" {
+		if p, ok := store.CurrentByBaseURL[baseURL]; ok {
+			if acc, ok := store.Accounts[authAccountKey(baseURL, p)]; ok && strings.TrimSpace(acc.APIKey) != "" {
+				return acc.APIKey, true
+			}
+		}
+		if acc, ok := store.Accounts[authAccountKey(baseURL, defaultAgentProfile)]; ok && strings.TrimSpace(acc.APIKey) != "" {
 			return acc.APIKey, true
 		}
 	}
 	return "", false
+}
+
+func authStoreGetToken(baseURL string) (string, bool) {
+	profile, _, _ := resolveProfile(baseURL, agentProfileFlag)
+	return authStoreGetTokenForProfile(baseURL, profile)
 }
 
 const (

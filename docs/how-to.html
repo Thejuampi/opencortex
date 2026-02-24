@@ -782,6 +782,12 @@ flowchart TD
       server and port, installation succeeded. If not, check
       <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor --fix</code> for diagnostics.
     </p>
+    <p>
+      For multiple agents on the same host, assign a stable profile per agent process:
+      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex --agent-profile planner ...</code>
+      and <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex --agent-profile reviewer ...</code>.
+      This preserves identity across restarts and compacted context.
+    </p>
     <div class="code-block" style="margin-top:4px">
       <code># Verify installation succeeded
 opencortex status</code>

@@ -15,18 +15,19 @@ import (
 )
 
 type localStatus struct {
-	Running       bool   `json:"running"`
-	PID           int    `json:"pid,omitempty"`
-	ServerURL     string `json:"server_url,omitempty"`
-	Healthy       bool   `json:"healthy"`
-	ConfigPath    string `json:"config_path"`
-	DBPath        string `json:"db_path"`
-	MCPEnabled    bool   `json:"mcp_enabled"`
-	MCPHTTP       bool   `json:"mcp_http_enabled"`
-	CurrentAuth   string `json:"current_auth,omitempty"`
-	CurrentAgent  string `json:"current_agent,omitempty"`
-	LastStartErr  string `json:"last_start_error,omitempty"`
-	ConsentCached *bool  `json:"auto_start_local_server,omitempty"`
+	Running        bool   `json:"running"`
+	PID            int    `json:"pid,omitempty"`
+	ServerURL      string `json:"server_url,omitempty"`
+	Healthy        bool   `json:"healthy"`
+	ConfigPath     string `json:"config_path"`
+	DBPath         string `json:"db_path"`
+	MCPEnabled     bool   `json:"mcp_enabled"`
+	MCPHTTP        bool   `json:"mcp_http_enabled"`
+	CurrentAuth    string `json:"current_auth,omitempty"`
+	CurrentProfile string `json:"current_profile,omitempty"`
+	CurrentAgent   string `json:"current_agent,omitempty"`
+	LastStartErr   string `json:"last_start_error,omitempty"`
+	ConsentCached  *bool  `json:"auto_start_local_server,omitempty"`
 }
 
 type doctorCheck struct {
@@ -128,6 +129,9 @@ func newStatusCommand(cfgPath *string, asJSON *bool) *cobra.Command {
 			fmt.Printf("healthy: %v\n", st.Healthy)
 			fmt.Printf("config: %s\n", st.ConfigPath)
 			fmt.Printf("db: %s\n", st.DBPath)
+			if st.CurrentProfile != "" {
+				fmt.Printf("profile: %s\n", st.CurrentProfile)
+			}
 			if st.CurrentAgent != "" {
 				fmt.Printf("auth: %s (%s)\n", st.CurrentAuth, st.CurrentAgent)
 			}
@@ -174,27 +178,30 @@ func collectLocalStatus(cfgPath string) (localStatus, error) {
 		serverURL = discoverServerURL()
 	}
 	store, _ := authStoreLoad()
-	var currentAuth, currentAgent string
-	if cur := strings.TrimSpace(store.Current); cur != "" {
-		currentAuth = cur
-		if acc, ok := store.Accounts[cur]; ok {
+	var currentAuth, currentProfile, currentAgent string
+	base := canonicalBaseURL(serverURL)
+	currentAuth = base
+	if p, ok := authStoreCurrentProfile(base); ok || p != "" {
+		currentProfile = p
+		if acc, ok := store.Accounts[authAccountKey(base, p)]; ok {
 			currentAgent = acc.AgentName
 		}
 	}
 	cliSt, _ := loadCLIState()
 	return localStatus{
-		Running:       running,
-		PID:           pid,
-		ServerURL:     serverURL,
-		Healthy:       isServerHealthy(serverURL),
-		ConfigPath:    cfgPath,
-		DBPath:        cfg.Database.Path,
-		MCPEnabled:    cfg.MCP.Enabled,
-		MCPHTTP:       cfg.MCP.HTTP.Enabled,
-		CurrentAuth:   currentAuth,
-		CurrentAgent:  currentAgent,
-		LastStartErr:  cliSt.LastStartError,
-		ConsentCached: cliSt.AutoStartLocalServer,
+		Running:        running,
+		PID:            pid,
+		ServerURL:      serverURL,
+		Healthy:        isServerHealthy(serverURL),
+		ConfigPath:     cfgPath,
+		DBPath:         cfg.Database.Path,
+		MCPEnabled:     cfg.MCP.Enabled,
+		MCPHTTP:        cfg.MCP.HTTP.Enabled,
+		CurrentAuth:    currentAuth,
+		CurrentProfile: currentProfile,
+		CurrentAgent:   currentAgent,
+		LastStartErr:   cliSt.LastStartError,
+		ConsentCached:  cliSt.AutoStartLocalServer,
 	}, nil
 }
 
@@ -251,8 +258,8 @@ func runDoctor(cfgPath string, fix bool) []doctorCheck {
 	}
 
 	store, _ := authStoreLoad()
-	if cur := strings.TrimSpace(store.Current); cur != "" {
-		if acc, ok := store.Accounts[cur]; ok && strings.TrimSpace(acc.APIKey) != "" && isServerHealthy(baseURL) {
+	if profile, ok := authStoreCurrentProfile(baseURL); ok && strings.TrimSpace(profile) != "" {
+		if acc, ok := store.Accounts[authAccountKey(baseURL, profile)]; ok && strings.TrimSpace(acc.APIKey) != "" && isServerHealthy(baseURL) {
 			client := newAPIClient(baseURL, acc.APIKey)
 			var me map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/agents/me", nil, &me); err != nil {
