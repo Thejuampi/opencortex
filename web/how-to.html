@@ -672,9 +672,9 @@ flowchart TD
     A([Start installer]) --> B[Download binary for platform]
     B --> C[Install to /usr/local/bin]
     C --> D{First run?}
-    D -- Yes --> E[Generate admin key\nCreate ~/.opencortex/]
-    D -- No --> F[Skip init]
-    E --> G[Start server on :8080]
+    D -- Yes --> E[Run doctor --fix\nCreate/repair ~/.opencortex/]
+    D -- No --> F[Skip repair]
+    E --> G[Run opencortex start]
     F --> G
     G --> H{Port 8080 free?}
     H -- No --> I[Try :8081, :8082 ...\nUpdate all configs]

@@ -1,9 +1,17 @@
 SHELL := /bin/bash
 
-.PHONY: build build-autostart test test-integration lint web-build web-sync
+.PHONY: build build-autostart install test test-integration lint web-build web-sync
 
 build:
 	go build ./...
+
+install:
+	go install ./cmd/opencortex
+	@echo Installed opencortex.
+	@echo Binary directory:
+	@go env GOBIN
+	@echo If empty above, use:
+	@go env GOPATH
 
 build-autostart:
 	go build -tags autostart ./...

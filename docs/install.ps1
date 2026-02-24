@@ -39,14 +39,13 @@ try {
     $env:Path += ";" + $binDir
   }
 
-  & (Join-Path $binDir "opencortex.exe") init --all --silent
-
-  $taskCmd = "`"$binDir\opencortex.exe`" server"
-  schtasks /Create /F /SC ONLOGON /TN OpenCortexServer /TR $taskCmd | Out-Null
-
-  $running = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "opencortex.exe" -and $_.CommandLine -match "server" }
-  if (-not $running) {
-    Start-Process -FilePath (Join-Path $binDir "opencortex.exe") -ArgumentList "server"
+  try {
+    & (Join-Path $binDir "opencortex.exe") doctor --fix | Out-Null
+  } catch {}
+  try {
+    & (Join-Path $binDir "opencortex.exe") start --yes | Out-Null
+  } catch {
+    & (Join-Path $binDir "opencortex.exe") start | Out-Null
   }
 
   $readyUrl = "http://localhost:8080"
@@ -66,7 +65,7 @@ try {
   Start-Process $readyUrl | Out-Null
 
   Write-Host ""
-  Write-Host "✓ OpenCortex is ready."
+  Write-Host "OpenCortex is ready."
   Write-Host "  Dashboard -> $readyUrl"
   Write-Host "  Manual setup -> $PagesBase/manual-setup.html"
 }

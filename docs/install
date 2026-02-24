@@ -74,14 +74,9 @@ case ":$PATH:" in
   ;;
 esac
 
-echo "Bootstrapping OpenCortex..."
-opencortex init --all --silent || true
-
-if pgrep -f "opencortex server" >/dev/null 2>&1; then
-  :
-else
-  nohup opencortex server >/tmp/opencortex.log 2>&1 &
-fi
+echo "Preparing OpenCortex..."
+opencortex doctor --fix >/dev/null 2>&1 || true
+opencortex start --yes >/dev/null 2>&1 || opencortex start >/dev/null 2>&1 || true
 
 ready_url=""
 for _ in $(seq 1 30); do
@@ -102,6 +97,6 @@ if [ -n "$ready_url" ]; then
 fi
 
 echo ""
-echo "✓ OpenCortex is ready."
+echo "OpenCortex is ready."
 echo "  Dashboard -> ${ready_url:-http://localhost:8080}"
 echo "  Manual setup -> ${BASE_PAGES}/manual-setup.html"
