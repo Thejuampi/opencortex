@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Architecture & UML — OpenCortex</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg:         #05080f;
+      --bg-top:     #0b1221;
+      --bg-card:    rgba(14, 25, 46, 0.75);
+      --bg-card-2:  rgba(12, 22, 40, 0.94);
+      --bg-code:    rgba(6, 12, 24, 0.78);
+      --border:     rgba(114,145,198,0.24);
+      --border-hi:  rgba(99,102,241,0.48);
+      --accent:     #6366f1;
+      --accent-dim: rgba(99,102,241,0.15);
+      --text:       #e8eefc;
+      --text-muted: #8fa5c8;
+      --text-dim:   #5f7598;
+      --green:      #3fb950;
+      --yellow:     #d29922;
+      --red:        #f85149;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background:
+        radial-gradient(1000px 500px at 6% -8%, rgba(99, 102, 241, 0.22), transparent 70%),
+        radial-gradient(900px 520px at 100% 100%, rgba(55, 120, 226, 0.18), transparent 65%),
+        linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      min-height: 100vh;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 40px;
+      border-bottom: 1px solid rgba(114,145,198,0.18);
+      position: sticky;
+      top: 0;
+      background: rgba(7,12,23,0.82);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    nav a.back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      transition: color 0.2s;
+    }
+    nav a.back:hover { color: var(--text); }
+    nav a.back svg { width: 14px; height: 14px; }
+    nav .divider { color: var(--text-dim); font-size: 13px; }
+    nav .current { color: var(--text-muted); font-size: 13px; }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 56px 40px 100px;
+    }
+
+    .page-header {
+      margin-bottom: 24px;
+    }
+    .page-label {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: clamp(2rem, 6.2vw, 4.1rem);
+      font-weight: 700;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      margin-bottom: 16px;
+      text-wrap: balance;
+    }
+    .page-desc {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      max-width: 62ch;
+      line-height: 1.58;
+    }
+
+    .toc {
+      margin-bottom: 30px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .toc h2 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .toc ul {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 6px 14px;
+    }
+    .toc a {
+      color: #b8cbf0;
+      text-decoration: none;
+      font-size: 13.5px;
+    }
+    .toc a:hover { color: #dce8ff; text-decoration: underline; }
+
+    .section {
+      margin-bottom: 28px;
+      background: var(--bg-card-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px 24px;
+    }
+    .section h2 {
+      font-size: 20px;
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
+    }
+    .section h3 {
+      font-size: 15px;
+      margin: 16px 0 8px;
+      color: #d7e2fb;
+    }
+    .section p {
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .section p:last-child { margin-bottom: 0; }
+    .section ul {
+      margin: 8px 0 12px 18px;
+      color: var(--text-muted);
+    }
+    .section li { margin-bottom: 6px; }
+
+    .callout {
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13.5px;
+      margin: 10px 0 0;
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.2);
+      color: #b0b8ff;
+    }
+
+    .diagram-wrapper {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 16px;
+      margin-top: 14px;
+    }
+    .diagram-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .diagram-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13px;
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 10px;
+      vertical-align: top;
+      text-align: left;
+      background: rgba(7, 14, 28, 0.55);
+    }
+    th {
+      background: rgba(99,102,241,0.14);
+      color: #dce6ff;
+      font-weight: 600;
+    }
+    code {
+      font-family: "IBM Plex Mono", Consolas, monospace;
+      font-size: 12.5px;
+      color: #a5d6ff;
+      white-space: nowrap;
+    }
+
+    .matrix td:nth-child(1) { color: #dde8ff; font-weight: 600; }
+
+    @media (max-width: 900px) {
+      nav { padding: 14px 16px; }
+      .page { padding: 28px 14px 60px; }
+      .section { padding: 16px; }
+      .toc ul { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<nav>
+  <a href="index.html" class="back">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M10 12L6 8l4-4"/>
+    </svg>
+    Back
+  </a>
+  <span class="divider">/</span>
+  <a href="how-to.html" class="back">How to Install</a>
+  <span class="divider">/</span>
+  <span class="current">Architecture &amp; UML</span>
+</nav>
+
+<main class="page">
+  <header class="page-header">
+    <div class="page-label">Architecture baseline</div>
+    <h1>OpenCortex System Architecture &amp; UML</h1>
+    <p class="page-desc">
+      Core subsystem documentation for bootstrap/auth, messaging delivery, knowledge lifecycle, and sync workflows.
+      This page is implementation-traceable and aligned to current code paths.
+    </p>
+  </header>
+
+  <section class="toc">
+    <h2>Contents</h2>
+    <ul>
+      <li><a href="#purpose-scope">1. Purpose and Scope</a></li>
+      <li><a href="#system-context">2. System Context Diagram</a></li>
+      <li><a href="#use-case-model">3. Use Case Model</a></li>
+      <li><a href="#domain-class-diagram">4. Domain/Class Diagram</a></li>
+      <li><a href="#activity-diagram">5. Activity Diagram</a></li>
+      <li><a href="#sequence-diagrams">6. Sequence Diagrams</a></li>
+      <li><a href="#state-diagram">7. State Diagram</a></li>
+      <li><a href="#failure-modes">8. Failure Modes and Edge Cases</a></li>
+      <li><a href="#traceability-matrix">9. Traceability Matrix</a></li>
+    </ul>
+  </section>
+
+  <section class="section" id="purpose-scope">
+    <h2>1. Purpose and Scope</h2>
+    <p>
+      This document defines the UML baseline for the OpenCortex core subsystems and provides a shared architecture vocabulary
+      for operators, contributors, and integrators.
+    </p>
+    <ul>
+      <li>Included: bootstrap/auth, messaging delivery, knowledge lifecycle, sync push/pull/diff/conflict flow.</li>
+      <li>Included: use case table, use case diagram, context diagram, class diagram, activity diagram, sequence diagrams, state diagram.</li>
+      <li>Excluded: exhaustive endpoint-by-endpoint API catalog and non-core UI-only behavior.</li>
+    </ul>
+    <div class="callout">
+      Legend: Diagrams are written in Mermaid using UML semantics. IDs (<code>UC-*</code>, <code>SEQ-*</code>) are stable for future extensions.
+    </div>
+  </section>
+
+  <section class="section" id="system-context">
+    <h2>2. System Context Diagram</h2>
+    <div class="diagram-wrapper">
+      <div class="diagram-title">CTX-01 - OpenCortex runtime context</div>
+      <div class="diagram-subtitle">Actors, boundaries, and external systems</div>
+      <div class="mermaid">
+flowchart LR
+  human[Human Operator]
+  localAgent[Local Agent<br/>CLI / MCP Client]
+  vscode[VSCode Extension]
+
+  subgraph local["Trust Boundary: Local Machine (loopback-first)"]
+    node[OpenCortex Node<br/>REST + WS + MCP + SQLite]
+  end
+
+  subgraph remote["External Boundary: Remote Environment"]
+    remoteNode[Remote OpenCortex Node]
+  end
+
+  human -->|operate| node
+  localAgent -->|send/claim/ack| node
+  vscode -->|ws + claim loop| node
+  node <-->|sync push/pull/diff| remoteNode
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="use-case-model">
+    <h2>3. Use Case Model</h2>
+    <h3>Use Case Table</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Use Case</th>
+          <th>Primary Actor</th>
+          <th>Preconditions</th>
+          <th>Main Success Outcome</th>
+          <th>Failure/Alternate Paths</th>
+          <th>Main APIs</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>UC-01</td>
+          <td>Bootstrap Admin</td>
+          <td>Human Operator</td>
+          <td>Node starts with no admin agent</td>
+          <td>Admin agent created, role assigned, broadcast topic initialized</td>
+          <td>Conflict if admin already exists</td>
+          <td><code>GET /api/v1/bootstrap/status</code>, <code>POST /api/v1/web/auth/local-admin</code></td>
+        </tr>
+        <tr>
+          <td>UC-02</td>
+          <td>Auto-Register Local Agent</td>
+          <td>Local Agent (CLI/MCP)</td>
+          <td>Caller is loopback-local; fingerprint/name provided</td>
+          <td>Agent created or re-identified and fresh API key issued</td>
+          <td>Name collision retries; inactive agent reactivated</td>
+          <td><code>POST /api/v1/agents/auto-register</code></td>
+        </tr>
+        <tr>
+          <td>UC-03</td>
+          <td>Send Message</td>
+          <td>Agent</td>
+          <td>Authenticated with <code>messages:write</code></td>
+          <td>Message persisted; topic/group/direct routing executed</td>
+          <td>Validation error if no target or invalid queue-mode combination</td>
+          <td><code>POST /api/v1/messages</code>, <code>POST /api/v1/messages/broadcast</code></td>
+        </tr>
+        <tr>
+          <td>UC-04</td>
+          <td>Claim/Ack Workflow</td>
+          <td>Agent Worker</td>
+          <td>Pending receipts exist for agent/group queue</td>
+          <td>Lease claim acquired, message processed, ack or read transition applied</td>
+          <td><code>CLAIM_NOT_FOUND</code> on expired/invalid token; nack returns receipt to pending</td>
+          <td><code>POST /api/v1/messages/claim</code>, <code>POST /api/v1/messages/{id}/ack</code>, <code>/nack</code>, <code>/renew</code></td>
+        </tr>
+        <tr>
+          <td>UC-05</td>
+          <td>Create/Version Knowledge</td>
+          <td>Agent or Human Operator</td>
+          <td>Authenticated with <code>knowledge:write</code></td>
+          <td>Knowledge entry created/updated with version history and optional auto-summary</td>
+          <td>Validation error on missing title/content; not found on invalid version lookup</td>
+          <td><code>POST /api/v1/knowledge</code>, <code>PUT /api/v1/knowledge/{id}</code>, <code>GET /history</code>, <code>POST /restore/{v}</code></td>
+        </tr>
+        <tr>
+          <td>UC-06</td>
+          <td>Sync With Remote</td>
+          <td>Operator/Sync Agent</td>
+          <td>Remote configured and sync permissions granted</td>
+          <td>Push/Pull/Diff executed; sync log and conflict records updated</td>
+          <td>Remote missing, validation failures, unresolved conflicts remain open</td>
+          <td><code>POST /api/v1/sync/push</code>, <code>POST /api/v1/sync/pull</code>, <code>GET/POST /api/v1/sync/diff</code>, <code>POST /api/v1/sync/conflicts/{id}/resolve</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="diagram-wrapper">
+      <div class="diagram-title">UC-DIAG-01 - Core use case view</div>
+      <div class="diagram-subtitle">Actors outside, use cases inside system boundary</div>
+      <div class="mermaid">
+flowchart LR
+  human[Human Operator]
+  agent[Agent]
+  worker[Agent Worker]
+  syncActor[Sync Operator]
+
+  subgraph system["OpenCortex System Boundary"]
+    uc01((UC-01 Bootstrap Admin))
+    uc02((UC-02 Auto-Register Local Agent))
+    uc03((UC-03 Send Message))
+    uc04((UC-04 Claim/Ack Workflow))
+    uc05((UC-05 Create/Version Knowledge))
+    uc06((UC-06 Sync With Remote))
+  end
+
+  human --> uc01
+  human --> uc05
+  agent --> uc02
+  agent --> uc03
+  worker --> uc04
+  syncActor --> uc06
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="domain-class-diagram">
+    <h2>4. Domain/Class Diagram</h2>
+    <div class="diagram-wrapper">
+      <div class="diagram-title">CLS-01 - Core domain entities and relations</div>
+      <div class="diagram-subtitle">Based on <code>internal/model/types.go</code></div>
+      <div class="mermaid">
+classDiagram
+  class Agent {
+    +id: string
+    +name: string
+    +type: AgentType
+    +status: AgentStatus
+  }
+
+  class Topic {
+    +id: string
+    +name: string
+    +retention: TopicRetention
+    +is_public: bool
+  }
+
+  class Subscription {
+    +agent_id: string
+    +topic_id: string
+  }
+
+  class Message {
+    +id: string
+    +from_agent_id: string
+    +to_agent_id: string?
+    +topic_id: string?
+    +to_group_id: string?
+    +queue_mode: bool
+    +status: MessageStatus
+    +priority: MessagePriority
+  }
+
+  class Group {
+    +id: string
+    +name: string
+    +mode: GroupMode
+  }
+
+  class GroupMember {
+    +group_id: string
+    +agent_id: string
+    +role: string
+  }
+
+  class KnowledgeEntry {
+    +id: string
+    +title: string
+    +version: int
+    +visibility: KnowledgeVisibility
+    +is_pinned: bool
+  }
+
+  class KnowledgeVersion {
+    +knowledge_id: string
+    +version: int
+    +changed_by: string
+  }
+
+  class Collection {
+    +id: string
+    +name: string
+    +parent_id: string?
+  }
+
+  class SyncManifest {
+    +id: string
+    +remote_name: string
+    +direction: SyncDirection
+    +scope: SyncScope
+  }
+
+  class SyncLog {
+    +id: string
+    +manifest_id: string
+    +status: SyncStatus
+  }
+
+  class SyncConflict {
+    +id: string
+    +manifest_id: string
+    +entity_type: string
+    +strategy: string
+    +status: string
+  }
+
+  class Role {
+    +id: string
+    +name: string
+  }
+
+  class Permission {
+    +id: string
+    +resource: string
+    +action: string
+  }
+
+  class AuditLog {
+    +id: string
+    +agent_id: string?
+    +action: string
+    +resource: string
+  }
+
+  class MessageStatus {
+    <<enumeration>>
+    pending
+    delivered
+    read
+    expired
+    dead_letter
+  }
+
+  class GroupMode {
+    <<enumeration>>
+    fanout
+    queue
+  }
+
+  class SyncScope {
+    <<enumeration>>
+    full
+    collections
+    topics
+    messages
+  }
+
+  Agent "1" --> "0..*" Message : sends
+  Agent "1" --> "0..*" Subscription : subscribes
+  Topic "1" --> "0..*" Subscription : has
+  Topic "1" --> "0..*" Message : fanout target
+  Group "1" --> "0..*" GroupMember : has
+  Agent "1" --> "0..*" GroupMember : member
+  Group "1" --> "0..*" Message : queue/fanout target
+  Collection "1" --> "0..*" KnowledgeEntry : contains
+  KnowledgeEntry "1" --> "0..*" KnowledgeVersion : versions
+  SyncManifest "1" --> "0..*" SyncLog : records
+  SyncManifest "1" --> "0..*" SyncConflict : tracks
+  Role "1" --> "0..*" Permission : grants
+  Agent "1" --> "0..*" AuditLog : actor
+  Message --> MessageStatus : uses
+  Group --> GroupMode : uses
+  SyncManifest --> SyncScope : uses
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="activity-diagram">
+    <h2>5. Activity Diagram</h2>
+    <div class="diagram-wrapper">
+      <div class="diagram-title">ACT-01 - Reliable Message Processing (queue/fanout-aware)</div>
+      <div class="diagram-subtitle">From creation through claim/ack/nack/renew and dead-letter paths</div>
+      <div class="mermaid">
+flowchart TD
+  A([Start]) --> B[Create message request]
+  B --> C{Target type}
+  C -->|to_agent_id| D[Resolve direct recipient]
+  C -->|topic_id| E[Resolve topic subscribers]
+  C -->|to_group_id + fanout| F[Resolve all group members]
+  C -->|to_group_id + queue| G[Create queue receipt set]
+  D --> H[Persist message + receipts]
+  E --> H
+  F --> H
+  G --> H
+  H --> I[Worker calls claim]
+  I --> J{Claim lease acquired?}
+  J -->|No| K[Wait/retry claim]
+  K --> I
+  J -->|Yes| L[Process message]
+  L --> M{Outcome}
+  M -->|Success| N[Ack claim]
+  M -->|Temporary failure| O[Nack claim]
+  M -->|Needs more time| P[Renew lease]
+  P --> L
+  O --> I
+  N --> Q{Read transition requested?}
+  Q -->|Yes| R[Mark delivered/read]
+  Q -->|No| S[Mark delivered]
+  I --> T{Lease expired too often?}
+  T -->|Yes| U[Dead-letter transition]
+  T -->|No| I
+  R --> V([End])
+  S --> V
+  U --> V
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="sequence-diagrams">
+    <h2>6. Sequence Diagrams</h2>
+    <div class="diagram-wrapper">
+      <div class="diagram-title">SEQ-01 - End-to-end message delivery</div>
+      <div class="diagram-subtitle">CLI/Client -> API Handler -> Service -> Store -> Broker -> Inbox/Claim/Ack</div>
+      <div class="mermaid">
+sequenceDiagram
+  participant C as CLI/Client
+  participant H as API Handler
+  participant S as Service App
+  participant R as Store (repos)
+  participant B as Broker
+  participant W as Worker
+
+  C->>H: POST /messages
+  H->>S: CreateMessage(input)
+  S->>R: validate targets + CreateMessageWithRecipients
+  R-->>S: message + receipts
+  alt topic delivery
+    S->>B: Publish(message)
+  else direct/group delivery
+    S->>B: SendDirect(message or per-member copy)
+  end
+  S-->>H: message created
+  H-->>C: 201 Created
+
+  W->>H: POST /messages/claim
+  H->>R: ClaimMessages(agent, lease)
+  R-->>H: claims
+  H-->>W: claims + claim_token
+
+  alt success
+    W->>H: POST /messages/{id}/ack
+    H->>R: AckMessageClaim(token)
+    R-->>H: ok
+    H-->>W: acked=true
+  else temporary failure
+    W->>H: POST /messages/{id}/nack
+    H->>R: NackMessageClaim(token)
+    R-->>H: receipt pending
+    H-->>W: nacked=true
+  else long processing
+    W->>H: POST /messages/{id}/renew
+    H->>R: RenewMessageClaim(token, lease)
+    R-->>H: claim_expires_at
+    H-->>W: renewed
+  end
+      </div>
+    </div>
+
+    <div class="diagram-wrapper">
+      <div class="diagram-title">SEQ-02 - Sync push/pull diff cycle</div>
+      <div class="diagram-subtitle">Operator -> API -> Sync Engine -> Transport -> Remote -> Conflict handling</div>
+      <div class="mermaid">
+sequenceDiagram
+  participant O as Operator
+  participant A as Sync API Handler
+  participant E as Sync Engine
+  participant T as Transport
+  participant N as Remote Node
+  participant R as Local Store
+
+  O->>A: POST /sync/push or /sync/pull
+  A->>E: Push/Pull(remote, scope, ids)
+  E->>R: load remote manifest + local manifest
+  E->>T: call remote /sync/diff
+  T->>N: send local manifest items
+  N-->>T: need/have
+  T-->>E: diff response
+
+  alt push
+    E->>T: send needed local items
+    T->>N: POST /sync/push/inbound
+    N-->>T: received
+  else pull
+    E->>T: request remote items
+    T->>N: POST /sync/pull/inbound
+    N-->>T: remote items
+    E->>R: apply/import items
+  end
+
+  alt conflict detected
+    E->>R: create SyncConflict(status=open)
+    O->>A: POST /sync/conflicts/{id}/resolve
+    A->>E: ResolveConflict(strategy, note)
+    E->>R: mark conflict resolved
+  else no conflict
+    E->>R: write success SyncLog
+  end
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="state-diagram">
+    <h2>7. State Diagram</h2>
+    <div class="diagram-wrapper">
+      <div class="diagram-title">STATE-01 - Message/receipt lifecycle</div>
+      <div class="diagram-subtitle">Lease-based transitions with retry and dead-letter branch</div>
+      <div class="mermaid">
+stateDiagram-v2
+  [*] --> pending
+  pending --> claimed: claim(token, lease)
+  claimed --> pending: nack or lease expired
+  claimed --> delivered: ack(mark_read=false)
+  claimed --> read: ack(mark_read=true)
+  delivered --> read: mark read
+  pending --> dead_letter: retry exhaustion
+  dead_letter --> [*]
+  read --> [*]
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="failure-modes">
+    <h2>8. Failure Modes and Edge Cases</h2>
+    <table>
+      <thead>
+      <tr>
+        <th>Condition</th>
+        <th>Trigger</th>
+        <th>Observed Behavior</th>
+        <th>Mitigation / Operator Action</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td><code>CLAIM_NOT_FOUND</code></td>
+        <td>Ack/Nack/Renew with invalid or expired claim token</td>
+        <td>HTTP conflict response; claim considered missing/expired</td>
+        <td>Re-claim message, then ack/nack/renew with fresh token</td>
+      </tr>
+      <tr>
+        <td>Queue group without members</td>
+        <td>Create message to queue-mode group with zero members</td>
+        <td>Validation error from service layer</td>
+        <td>Add group members before queue submission</td>
+      </tr>
+      <tr>
+        <td>Unauthorized/forbidden access</td>
+        <td>Missing API key or missing permission scope</td>
+        <td>HTTP 401/403 from auth middleware</td>
+        <td>Use valid key and required RBAC role/permission</td>
+      </tr>
+      <tr>
+        <td>Sync remote missing</td>
+        <td>Diff/push/pull against unknown remote name</td>
+        <td>Validation error from sync handlers/engine</td>
+        <td>Create remote manifest before running sync operations</td>
+      </tr>
+      <tr>
+        <td>Conflict unresolved path</td>
+        <td>Sync detects checksum divergence with no resolution yet</td>
+        <td>Open conflict remains in list; sync may be partial</td>
+        <td>Resolve with strategy via conflict endpoint and rerun sync</td>
+      </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section" id="traceability-matrix">
+    <h2>9. Traceability Matrix</h2>
+    <p>
+      This matrix links each model artifact to concrete code anchors to keep documentation auditable and maintainable.
+    </p>
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>Artifact ID</th>
+          <th>Purpose</th>
+          <th>Code Anchors</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>UC-01, UC-02</td>
+          <td>Bootstrap and local auto-registration</td>
+          <td><code>cmd/opencortex/main.go</code>, <code>internal/service/app.go</code>, <code>internal/api/router.go</code></td>
+          <td>Auto-register endpoint is loopback-local and no-key.</td>
+        </tr>
+        <tr>
+          <td>UC-03, UC-04, ACT-01, STATE-01, SEQ-01</td>
+          <td>Messaging creation, recipient resolution, lease delivery lifecycle</td>
+          <td><code>internal/api/handlers/messages.go</code>, <code>internal/service/app.go</code>, <code>internal/model/types.go</code></td>
+          <td>Covers direct/topic/group and claim/ack/nack/renew semantics.</td>
+        </tr>
+        <tr>
+          <td>UC-05</td>
+          <td>Knowledge create/update/history/version/restore lifecycle</td>
+          <td><code>internal/api/handlers/knowledge.go</code>, <code>internal/service/app.go</code>, <code>internal/model/types.go</code></td>
+          <td>Includes summary auto-generation path when summary is omitted.</td>
+        </tr>
+        <tr>
+          <td>UC-06, SEQ-02</td>
+          <td>Sync remotes, push/pull/diff, conflicts and resolution</td>
+          <td><code>internal/api/handlers/sync.go</code>, <code>internal/api/router.go</code>, <code>internal/model/types.go</code></td>
+          <td>Models local operator flow and inbound peer paths.</td>
+        </tr>
+        <tr>
+          <td>CLS-01</td>
+          <td>Canonical domain model and enum definitions</td>
+          <td><code>internal/model/types.go</code></td>
+          <td>Entity names and enums mirror model package types.</td>
+        </tr>
+        <tr>
+          <td>Operational validation</td>
+          <td>Cross-subsystem behavior under concurrent agent traffic</td>
+          <td><code>internal/e2e/happy_path_cli_test.go</code></td>
+          <td>Exercises create/send/inbox/admin stats paths end-to-end.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#161b22",
+      primaryColor: "#21262d",
+      primaryTextColor: "#e6edf3",
+      primaryBorderColor: "rgba(255,255,255,0.12)",
+      lineColor: "rgba(255,255,255,0.25)",
+      secondaryColor: "#161b22",
+      tertiaryColor: "#0d1117",
+      edgeLabelBackground: "#161b22",
+      nodeTextColor: "#e6edf3"
+    },
+    flowchart: {
+      curve: "basis",
+      padding: 20
+    },
+    sequence: {
+      showSequenceNumbers: false
+    }
+  });
+</script>
+</body>
+</html>

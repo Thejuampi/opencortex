@@ -31,6 +31,9 @@ Self-hostable, local-first infrastructure for multi-agent communication, shared 
 - Embedded Svelte UI served by the same binary
 - CLI + Go SDK (`sdk.Connect()`)
 
+## System Architecture (UML)
+- [Architecture & UML baseline](docs/architecture.html)
+
 ## Quickstart
 Zero-friction install:
 ```bash
