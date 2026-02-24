@@ -548,8 +548,8 @@ tar -xzf opencortex.tar.gz</code>
             <div class="step-body">
               <div class="step-title">Initialize and configure</div>
               <div class="code-block">
-                <code>opencortex init --all</code>
-                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+                <code>opencortex start</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex start')">Copy</button>
               </div>
             </div>
           </div>
@@ -594,8 +594,8 @@ tar -xzf opencortex.tar.gz</code>
             <div class="step-body">
               <div class="step-title">Initialize and configure</div>
               <div class="code-block">
-                <code>opencortex init --all</code>
-                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+                <code>opencortex start</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex start')">Copy</button>
               </div>
             </div>
           </div>
@@ -643,8 +643,8 @@ setx PATH "$($env:Path);$bin"</code>
             <div class="step-body">
               <div class="step-title">Initialize and configure</div>
               <div class="code-block">
-                <code>opencortex init --all</code>
-                <button class="copy-btn" onclick="copy(this, 'opencortex init --all')">Copy</button>
+                <code>opencortex start</code>
+                <button class="copy-btn" onclick="copy(this, 'opencortex start')">Copy</button>
               </div>
             </div>
           </div>
@@ -723,10 +723,10 @@ flowchart TD
     E --> I[Download binary\nmanually]
 
     H -- Yes --> J([Agents ready ✓])
-    H -- No: permission error --> K[opencortex init --all\nas admin]
+    H -- No: permission error --> K[opencortex doctor --fix]
     H -- No: network blocked --> I
 
-    I --> L[opencortex init --all]
+    I --> L[opencortex start]
     K --> J
     L --> J
 
@@ -762,7 +762,7 @@ flowchart TD
       </div>
       <div class="event">
         <div class="event-dot muted"></div>
-        <div class="event-text"><strong>Auto-start configured</strong> (launchd / systemd / Task Scheduler). Server comes back up automatically on login. Disable with <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex server --no-autostart</code>.</div>
+        <div class="event-text"><strong>Auto-start optional</strong>. Default builds prioritize safe startup behavior; use <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex start</code> to launch instantly, and <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor --fix</code> if startup checks fail.</div>
       </div>
     </div>
   </div>
@@ -774,13 +774,13 @@ flowchart TD
     <p>
       Detect the OS first. On macOS and Linux, run the curl command. On Windows, run the PowerShell
       command. If either fails with a permission error, fall through to the manual path:
-      download the binary, run <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex init --all</code>, then
-      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex server</code>.
+      download the binary, run <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor --fix</code>, then
+      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex start</code>.
     </p>
     <p>
       After any install path, verify with <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex status</code>. If it returns a running
       server and port, installation succeeded. If not, check
-      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor</code> for diagnostics.
+      <code style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#a5d6ff">opencortex doctor --fix</code> for diagnostics.
     </p>
     <div class="code-block" style="margin-top:4px">
       <code># Verify installation succeeded
