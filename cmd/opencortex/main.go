@@ -141,18 +141,21 @@ func main() {
 	root.AddCommand(newMCPCommand(&cfgPath)) // 'mcp' alias, no --api-key needed
 	root.AddCommand(newConfigCommand(&cfgPath))
 	root.AddCommand(newAuthCommand(&baseURL, &apiKey, &asJSON))
-	root.AddCommand(newAgentsCommand(&baseURL, &apiKey, &asJSON))
-	root.AddCommand(newAgentsShortCommand(&baseURL, &apiKey, &asJSON)) // 'agents' top-level
-	root.AddCommand(newSendCommand(&baseURL, &apiKey))
-	root.AddCommand(newInboxCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newStartCommand(&cfgPath, &asJSON))
+	root.AddCommand(newStopCommand(&asJSON))
+	root.AddCommand(newStatusCommand(&cfgPath, &asJSON))
+	root.AddCommand(newDoctorCommand(&cfgPath, &asJSON))
+	root.AddCommand(newAgentsCommand(&cfgPath, &baseURL, &apiKey, &asJSON))
+	root.AddCommand(newSendCommand(&cfgPath, &baseURL, &apiKey))
+	root.AddCommand(newInboxCommand(&cfgPath, &baseURL, &apiKey, &asJSON))
 	root.AddCommand(newAckCommand(&baseURL, &apiKey))
-	root.AddCommand(newWorkerCommand(&baseURL, &apiKey))
-	root.AddCommand(newWatchCommand(&baseURL, &apiKey))
-	root.AddCommand(newBroadcastCommand(&baseURL, &apiKey))
+	root.AddCommand(newWorkerCommand(&cfgPath, &baseURL, &apiKey))
+	root.AddCommand(newWatchCommand(&cfgPath, &baseURL, &apiKey))
+	root.AddCommand(newBroadcastCommand(&cfgPath, &baseURL, &apiKey))
 	root.AddCommand(newKnowledgeCommand(&baseURL, &apiKey, &asJSON))
-	root.AddCommand(newSkillsCommand(&baseURL, &apiKey, &asJSON))
-	root.AddCommand(newSyncCommand(&baseURL, &apiKey, &asJSON))
-	root.AddCommand(newAdminCommand(&baseURL, &apiKey, &asJSON))
+	root.AddCommand(newSkillsCommand(&cfgPath, &baseURL, &apiKey, &asJSON))
+	root.AddCommand(newSyncCommand(&cfgPath, &baseURL, &apiKey, &asJSON))
+	root.AddCommand(newAdminCommand(&cfgPath, &baseURL, &apiKey, &asJSON))
 
 	if err := root.Execute(); err != nil {
 		log.Fatal(err)
@@ -396,7 +399,7 @@ func newAgentsShortCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command
 
 // newSendCommand implements `opencortex send --to <name> <message>` and
 // `opencortex send --topic <id> <message>`.
-func newSendCommand(baseURL, apiKey *string) *cobra.Command {
+func newSendCommand(cfgPath, baseURL, apiKey *string) *cobra.Command {
 	var (
 		toAgent string
 		toTopic string
@@ -415,7 +418,10 @@ func newSendCommand(baseURL, apiKey *string) *cobra.Command {
 			if toAgent == "" && toTopic == "" {
 				return errors.New("one of --to or --topic is required")
 			}
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			body := map[string]any{
 				"content":      args[0],
 				"content_type": "text/plain",
@@ -453,7 +459,7 @@ func newSendCommand(baseURL, apiKey *string) *cobra.Command {
 }
 
 // newInboxCommand implements `opencortex inbox [--wait] [--ack]`.
-func newInboxCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newInboxCommand(cfgPath, baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	var (
 		waitStr  string
 		count    int
@@ -472,7 +478,10 @@ func newInboxCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
   opencortex inbox --wait 30s
   opencortex inbox --priority critical`),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 
 			query := url.Values{}
 			if count > 0 {
@@ -568,7 +577,7 @@ func newAckCommand(baseURL, apiKey *string) *cobra.Command {
 	return cmd
 }
 
-func newWorkerCommand(baseURL, apiKey *string) *cobra.Command {
+func newWorkerCommand(cfgPath, baseURL, apiKey *string) *cobra.Command {
 	var (
 		topic   string
 		group   string
@@ -582,7 +591,10 @@ func newWorkerCommand(baseURL, apiKey *string) *cobra.Command {
   opencortex worker my-script.sh
   opencortex worker --topic tasks.review python handler.py`),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 
 			exe := args[0]
 			cmdArgs := args[1:]
@@ -648,7 +660,7 @@ func printInboxMessage(m map[string]any) {
 }
 
 // newWatchCommand implements `opencortex watch <topic> — streams messages.
-func newWatchCommand(baseURL, apiKey *string) *cobra.Command {
+func newWatchCommand(cfgPath, baseURL, apiKey *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch <topic>",
 		Short: "Watch a topic for new messages",
@@ -658,7 +670,10 @@ func newWatchCommand(baseURL, apiKey *string) *cobra.Command {
   opencortex watch tasks.review
   opencortex watch system.broadcast`),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			topicID := args[0]
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -697,7 +712,7 @@ func newWatchCommand(baseURL, apiKey *string) *cobra.Command {
 }
 
 // newBroadcastCommand implements `opencortex broadcast <message>`.
-func newBroadcastCommand(baseURL, apiKey *string) *cobra.Command {
+func newBroadcastCommand(cfgPath, baseURL, apiKey *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "broadcast <message>",
 		Short: "Broadcast a message to all agents",
@@ -705,7 +720,10 @@ func newBroadcastCommand(baseURL, apiKey *string) *cobra.Command {
 		Example: strings.TrimSpace(`
   opencortex broadcast "All agents: deploying v2.1 in 5 minutes"`),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodPost, "/api/v1/messages/broadcast", map[string]any{
 				"content":      args[0],
@@ -825,6 +843,7 @@ func newInitCommand(cfgPath *string) *cobra.Command {
   opencortex init --vscode-only
   opencortex init --show`),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "warning: `init` is legacy and will be removed; use `start` and `doctor`.")
 			if show {
 				return printJSON(map[string]any{"status": bootstrap.CurrentStatus()})
 			}
@@ -877,6 +896,7 @@ func newInitCommand(cfgPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&vscodeOnly, "vscode-only", false, "Only install VSCode extension if available")
 	cmd.Flags().BoolVar(&show, "show", false, "Show current bootstrap state")
 	cmd.Flags().BoolVar(&silent, "silent", false, "Suppress non-essential output")
+	cmd.Hidden = true
 	return cmd
 }
 
@@ -1506,7 +1526,7 @@ When --api-key is omitted, CLI commands use the saved account for --base-url.`),
 	return cmd
 }
 
-func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newAgentsCommand(cfgPath, baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "Agent management commands",
@@ -1519,7 +1539,10 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "list",
 		Short: "List agents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out struct {
 				Agents []model.Agent `json:"agents"`
 			}
@@ -1539,9 +1562,12 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "create",
 		Short: "Create an agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
-			err := client.do(http.MethodPost, "/api/v1/agents", map[string]any{
+			err = client.do(http.MethodPost, "/api/v1/agents", map[string]any{
 				"name":        createName,
 				"type":        createType,
 				"description": createDesc,
@@ -1565,7 +1591,10 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Get agent details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/agents/"+args[0], nil, &out); err != nil {
 				return err
@@ -1578,7 +1607,10 @@ func newAgentsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Rotate an agent API key",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodPost, "/api/v1/agents/"+args[0]+"/rotate-key", map[string]any{}, &out); err != nil {
 				return err
@@ -1721,7 +1753,7 @@ func newKnowledgeCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	return cmd
 }
 
-func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newSyncCommand(cfgPath, baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync commands",
@@ -1745,9 +1777,12 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Add a sync remote",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
-			err := client.do(http.MethodPost, "/api/v1/sync/remotes", map[string]any{
+			err = client.do(http.MethodPost, "/api/v1/sync/remotes", map[string]any{
 				"name":    args[0],
 				"url":     args[1],
 				"api_key": remoteKey,
@@ -1767,7 +1802,10 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "list",
 		Short: "List configured remotes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/sync/remotes", nil, &out); err != nil {
 				return err
@@ -1777,14 +1815,17 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	})
 	cmd.AddCommand(remoteCmd)
 
-	cmd.AddCommand(syncPushPullCommand("push", baseURL, apiKey))
-	cmd.AddCommand(syncPushPullCommand("pull", baseURL, apiKey))
+	cmd.AddCommand(syncPushPullCommand("push", cfgPath, baseURL, apiKey))
+	cmd.AddCommand(syncPushPullCommand("pull", cfgPath, baseURL, apiKey))
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
 		Short: "Show sync status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/sync/status", nil, &out); err != nil {
 				return err
@@ -1797,7 +1838,10 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Preview sync changes for a remote",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/sync/diff?remote="+args[0], nil, &out); err != nil {
 				return err
@@ -1809,7 +1853,10 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "conflicts",
 		Short: "List unresolved sync conflicts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodGet, "/api/v1/sync/conflicts", nil, &out); err != nil {
 				return err
@@ -1823,7 +1870,10 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Resolve a sync conflict",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodPost, "/api/v1/sync/conflicts/"+args[0]+"/resolve", map[string]any{
 				"strategy": strategy,
@@ -1840,7 +1890,7 @@ func newSyncCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	return cmd
 }
 
-func syncPushPullCommand(kind string, baseURL, apiKey *string) *cobra.Command {
+func syncPushPullCommand(kind string, cfgPath, baseURL, apiKey *string) *cobra.Command {
 	var key string
 	short := "Push data to remote"
 	if kind == "pull" {
@@ -1851,7 +1901,10 @@ func syncPushPullCommand(kind string, baseURL, apiKey *string) *cobra.Command {
 		Short: short,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			body := map[string]any{
 				"remote":  args[0],
@@ -1868,7 +1921,7 @@ func syncPushPullCommand(kind string, baseURL, apiKey *string) *cobra.Command {
 	return cmd
 }
 
-func newAdminCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newAdminCommand(cfgPath, baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "admin",
 		Short: "Admin commands",
@@ -1878,19 +1931,22 @@ func newAdminCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
   opencortex admin rbac roles --api-key <admin-key>
   opencortex admin rbac assign --agent <agent-id> --role agent --api-key <admin-key>`),
 	}
-	cmd.AddCommand(adminSimpleCommand("stats", "/api/v1/admin/stats", baseURL, apiKey))
-	cmd.AddCommand(adminSimpleCommand("backup", "/api/v1/admin/backup", baseURL, apiKey))
-	cmd.AddCommand(adminSimpleCommand("vacuum", "/api/v1/admin/vacuum", baseURL, apiKey))
+	cmd.AddCommand(adminSimpleCommand("stats", "/api/v1/admin/stats", cfgPath, baseURL, apiKey))
+	cmd.AddCommand(adminSimpleCommand("backup", "/api/v1/admin/backup", cfgPath, baseURL, apiKey))
+	cmd.AddCommand(adminSimpleCommand("vacuum", "/api/v1/admin/vacuum", cfgPath, baseURL, apiKey))
 
 	rbac := &cobra.Command{Use: "rbac", Short: "RBAC commands"}
-	rbac.AddCommand(adminSimpleCommand("roles", "/api/v1/admin/rbac/roles", baseURL, apiKey))
+	rbac.AddCommand(adminSimpleCommand("roles", "/api/v1/admin/rbac/roles", cfgPath, baseURL, apiKey))
 
 	var agentID, role string
 	assign := &cobra.Command{
 		Use:   "assign",
 		Short: "Assign role to an agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodPost, "/api/v1/admin/rbac/assign", map[string]any{
 				"agent_id": agentID,
@@ -1911,7 +1967,10 @@ func newAdminCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "revoke",
 		Short: "Revoke role from an agent",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodDelete, "/api/v1/admin/rbac/assign", map[string]any{
 				"agent_id": agentID,
@@ -1932,7 +1991,7 @@ func newAdminCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	return cmd
 }
 
-func adminSimpleCommand(use, path string, baseURL, apiKey *string) *cobra.Command {
+func adminSimpleCommand(use, path string, cfgPath, baseURL, apiKey *string) *cobra.Command {
 	method := http.MethodGet
 	if strings.Contains(path, "backup") || strings.Contains(path, "vacuum") {
 		method = http.MethodPost
@@ -1942,7 +2001,10 @@ func adminSimpleCommand(use, path string, baseURL, apiKey *string) *cobra.Comman
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAPIClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(method, path, map[string]any{}, &out); err != nil {
 				return err
@@ -2152,7 +2214,7 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 
 	if cmd.CommandPath() == "opencortex" {
 		fmt.Fprintf(b, "%sWHAT YOU CAN DO%s\n", sectionColor(), ansiReset)
-		fmt.Fprintf(b, "  %sLifecycle%s: initialize local state, run API+WS+UI/MCP server\n", ansiGreen, ansiReset)
+		fmt.Fprintf(b, "  %sLifecycle%s: start/stop/status/doctor for local runtime\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sAgents%s: register, inspect, rotate keys\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sKnowledge%s: add, search, version, export/import entries\n", ansiGreen, ansiReset)
 		fmt.Fprintf(b, "  %sSkills%s: manage shared skillsets and install local projections\n", ansiGreen, ansiReset)
@@ -2186,10 +2248,13 @@ func renderHelp(cmd *cobra.Command, _ []string) {
 
 	if cmd.CommandPath() == "opencortex" {
 		fmt.Fprintf(b, "%sQUICK WORKFLOWS%s\n", sectionColor(), ansiReset)
-		fmt.Fprintf(b, "  %sBoot and access UI%s\n", ansiGray, ansiReset)
-		fmt.Fprintf(b, "    opencortex init --all\n")
-		fmt.Fprintf(b, "    opencortex server\n")
-		fmt.Fprintf(b, "    # open http://localhost:8080\n\n")
+		fmt.Fprintf(b, "  %sStart and verify local runtime%s\n", ansiGray, ansiReset)
+		fmt.Fprintf(b, "    opencortex start\n")
+		fmt.Fprintf(b, "    opencortex status\n\n")
+
+		fmt.Fprintf(b, "  %sDiagnose local issues%s\n", ansiGray, ansiReset)
+		fmt.Fprintf(b, "    opencortex doctor\n")
+		fmt.Fprintf(b, "    opencortex doctor --fix\n\n")
 
 		fmt.Fprintf(b, "  %sRun MCP stdio server%s\n", ansiGray, ansiReset)
 		fmt.Fprintf(b, "    opencortex mcp-server --config ./config.yaml --api-key <key>\n\n")
@@ -2222,6 +2287,35 @@ func availableSubcommands(cmd *cobra.Command) []*cobra.Command {
 			continue
 		}
 		out = append(out, c)
+	}
+	if cmd.CommandPath() == "opencortex" {
+		priority := map[string]int{
+			"start":     1,
+			"stop":      2,
+			"status":    3,
+			"doctor":    4,
+			"send":      5,
+			"inbox":     6,
+			"broadcast": 7,
+			"watch":     8,
+			"skills":    9,
+			"agents":    10,
+		}
+		sort.Slice(out, func(i, j int) bool {
+			pi, iok := priority[out[i].Name()]
+			pj, jok := priority[out[j].Name()]
+			switch {
+			case iok && jok:
+				return pi < pj
+			case iok:
+				return true
+			case jok:
+				return false
+			default:
+				return out[i].Name() < out[j].Name()
+			}
+		})
+		return out
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
 	return out

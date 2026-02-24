@@ -36,7 +36,7 @@ type skillInstallResult struct {
 	Warnings      []string          `json:"warnings,omitempty"`
 }
 
-func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
+func newSkillsCommand(cfgPath, baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skills",
 		Short: "Manage shared skillsets",
@@ -55,7 +55,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Use:   "list",
 		Short: "List skillsets",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			v := url.Values{}
 			if strings.TrimSpace(listQuery) != "" {
 				v.Set("q", listQuery)
@@ -91,7 +94,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Search skillsets",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			path := "/api/v1/skills?q=" + url.QueryEscape(args[0])
 			if err := client.do(http.MethodGet, path, nil, &out); err != nil {
@@ -106,7 +112,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Get a skillset",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -145,7 +154,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 			if strings.TrimSpace(addSummary) != "" {
 				payload["summary"] = addSummary
 			}
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			var out map[string]any
 			if err := client.do(http.MethodPost, "/api/v1/skills", payload, &out); err != nil {
 				return err
@@ -212,7 +224,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 				payload["install"] = installPatch
 			}
 
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -274,7 +289,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 				return errors.New("nothing to patch")
 			}
 
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -300,7 +318,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Delete a skillset",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -318,7 +339,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Show skill history",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -336,7 +360,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Show specific skill version",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -354,7 +381,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Pin a skillset",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -372,7 +402,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Unpin a skillset",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err
@@ -393,7 +426,10 @@ func newSkillsCommand(baseURL, apiKey *string, asJSON *bool) *cobra.Command {
 		Short: "Install a skillset locally",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAutoClient(*baseURL, *apiKey)
+			client, err := newAutoClientWithEnsure(*baseURL, *apiKey, *cfgPath)
+			if err != nil {
+				return err
+			}
 			skill, err := resolveSkillSelector(client, args[0])
 			if err != nil {
 				return err

@@ -42,15 +42,16 @@ Windows:
 irm https://thejuampi.github.io/opencortex/install.ps1 | iex
 ```
 
-Manual runtime bootstrap:
+Manual runtime startup:
 ```bash
-go run ./cmd/opencortex server
+go run ./cmd/opencortex start
 ```
 Open `http://localhost:8080`.
 
 On localhost, agents connect with **zero configuration**:
 ```bash
-opencortex agents
+opencortex start
+opencortex status
 opencortex broadcast "Hello from Zero-Ceremony UX"
 ```
 
@@ -60,6 +61,9 @@ The CLI automatically discovers the local server and registers this process as a
 ### Help
 ```bash
 opencortex --help
+opencortex start
+opencortex status
+opencortex doctor --fix
 opencortex skills --help
 opencortex skills install --help
 ```
@@ -267,19 +271,11 @@ If projection links fail, installation still succeeds and prints warnings.
 ## Development
 ```bash
 go test ./...
-go run ./cmd/opencortex server --config ./config.yaml
+go run ./cmd/opencortex start --config ./config.yaml
 # default build profile (recommended for distribution; no OS autostart persistence hooks)
 go build ./cmd/opencortex
 # optional profile with autostart persistence integration
 go build -tags autostart ./cmd/opencortex
-```
-
-Bootstrap helpers:
-```bash
-opencortex init --all
-opencortex init --mcp-only
-opencortex init --vscode-only
-opencortex init --show
 ```
 
 For MCP stdio:
